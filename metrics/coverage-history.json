@@ -1,0 +1,55 @@
+{
+  "baseline": {
+    "bootstrap": {
+      "source_commit": "7043b2d65010601a440d2f3e823e8009d67d593d",
+      "source_run": "40385907502"
+    },
+    "counts": {
+      "go_sdlc_metrics": {
+        "covered": 710,
+        "total": 853
+      },
+      "python_plugin": {
+        "covered": 777,
+        "total": 974
+      },
+      "python_tools": {
+        "covered": 1666,
+        "total": 2544
+      }
+    },
+    "metrics": {
+      "go_sdlc_metrics": 83.2356389214537,
+      "python_plugin": 79.7741273100616,
+      "python_tools": 65.4874213836478
+    },
+    "ref": "7043b2d65010601a440d2f3e823e8009d67d593d"
+  },
+  "merges": [
+    {
+      "counts": {
+        "go_sdlc_metrics": {
+          "covered": 710,
+          "total": 853
+        },
+        "python_plugin": {
+          "covered": 777,
+          "total": 974
+        },
+        "python_tools": {
+          "covered": 1666,
+          "total": 2543
+        }
+      },
+      "metrics": {
+        "go_sdlc_metrics": 83.2356389214537,
+        "python_plugin": 79.7741273100616,
+        "python_tools": 65.51317341722375
+      },
+      "pr": 11,
+      "ref": "6edc32e561c75db21240535940cd41813528e434"
+    }
+  ],
+  "version": 1,
+  "window": 10
+}
