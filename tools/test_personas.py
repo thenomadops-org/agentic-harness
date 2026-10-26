@@ -104,6 +104,39 @@ class PersonaTests(unittest.TestCase):
             self.assertIn("engineer-1", team_org)
             self.assertIn("<persona>-<TICKET>", team_org)
 
+    def test_update_retires_legacy_named_agent_files_with_backup(self):
+        with tempfile.TemporaryDirectory() as vault:
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(setup.main([
+                    "--vault", vault, "--principal", "owner",
+                    "--packs", "core,engineering",
+                    "--tracker", "none", "--today", "2026-01-01",
+                ]), 0)
+
+            config_path = os.path.join(vault, ".claude", "org.config.json")
+            with open(config_path, encoding="utf-8") as handle:
+                config = json.load(handle)
+            config["theme"] = "default"
+            config["names"] = ["Legacy"]
+            with open(config_path, "w", encoding="utf-8") as handle:
+                json.dump(config, handle)
+
+            legacy = os.path.join(vault, ".claude", "agents", "legacy-agent.md")
+            os.makedirs(os.path.dirname(legacy), exist_ok=True)
+            content = "You are a retired persona.\n"
+            with open(legacy, "w", encoding="utf-8") as handle:
+                handle.write(content)
+
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output):
+                self.assertEqual(update.main(["--vault", vault]), 0)
+
+            self.assertFalse(os.path.exists(legacy), "legacy agent remains active")
+            backup = os.path.join(vault, ".claude", "retired-agents", "legacy-agent.md")
+            with open(backup, encoding="utf-8") as handle:
+                self.assertEqual(handle.read(), content)
+            self.assertIn("retired legacy named agent", output.getvalue())
+
 
 if __name__ == "__main__":
     unittest.main()
