@@ -1,0 +1,12 @@
+[Unit]
+Description=Close herdr panes, worktrees and scratch databases left by finished agents
+
+[Service]
+Type=oneshot
+# Tokens (GH_TOKEN, JIRA_EMAIL, JIRA_API_TOKEN, optional HX_AGENT and
+# HX_CHAT_CHANNEL for --chat) come from a private file the owner writes.
+# Never commit that file.
+EnvironmentFile=-%h/.config/agentic-os/cleanup.env
+Environment=PATH=@PATH@
+ExecStart=@PYTHON@ @HX@ reap --close
+Nice=10

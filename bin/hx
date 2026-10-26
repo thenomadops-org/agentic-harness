@@ -15,6 +15,9 @@ def main(argv):
             "commands:\n  chat  read and post to team Slack"
             "\n  lock lead  record an owner-authorized lead holder"
             "\n  lead       read or hand off the current lead brief"
+            "\n  done KEY   clean up a merged, Done ticket's panes, worktrees, databases"
+            "\n  merge PR   gh pr merge, then hx done for the pull request's ticket"
+            "\n  reap       report (or --close) what finished agents left behind"
         )
         return 0
     command, *args = argv
@@ -33,6 +36,18 @@ def main(argv):
         from hx_lead import main as lead_main
 
         return lead_main(args)
+    if command == "done":
+        from hx_done import done_main
+
+        return done_main(args)
+    if command == "merge":
+        from hx_done import merge_main
+
+        return merge_main(args)
+    if command == "reap":
+        from hx_reap import main as reap_main
+
+        return reap_main(args)
     print(f"hx: unknown command: {command}", file=sys.stderr)
     return 2
 

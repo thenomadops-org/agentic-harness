@@ -1,0 +1,10 @@
+[Unit]
+Description=Reap finished-agent leftovers nightly at 00:30 local time
+
+[Timer]
+OnCalendar=*-*-* 00:30:00
+Persistent=true
+RandomizedDelaySec=2min
+
+[Install]
+WantedBy=timers.target
