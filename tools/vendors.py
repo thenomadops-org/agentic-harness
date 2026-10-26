@@ -106,7 +106,11 @@ def plan_session(persona, ticket, installed, goal="", usage=None,
 
 
 def launch_persona(persona, ticket, installed, goal="", runner=None, **kwargs):
-    """Plan a session and hand its argv to runner. There is no default runner."""
+    """Plan a session and hand its argv to runner. There is no default runner.
+
+    tools/launch.py is the command that runs the planned command in a vault.
+    This function still refuses to start a process when runner is omitted.
+    """
     plan = plan_session(persona, ticket, installed, goal=goal, **kwargs)
     if runner is None:
         raise VendorError("refusing to start a session without a runner")

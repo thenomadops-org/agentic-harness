@@ -109,6 +109,11 @@ in the same breath as the result. **Briefing someone is not dispatching work** â
 when you hand work off, the check is whether the rows closed and the work merged,
 not whether a report came back.
 
+**Post the outcome.** When `team-post` is on PATH, post done, ready for QA,
+QA pass, QA fail, or blocked by running `team-post` with your vendor id.
+Your vendor id is the id of the CLI that started this session. When
+`team-post` is not on PATH, say nothing.
+
 **Before you ship a sentence, ask what would falsify it:** *if this became false,
 what would go red?* If the answer is nothing, you are asserting, not verifying.
 {{#fails_by}}

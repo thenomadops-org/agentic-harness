@@ -131,6 +131,7 @@ jobs:
           python3 tools/persona-boundary-check.py
           python3 tools/test_personas.py
           python3 tools/test_vendors.py
+          python3 tools/test_launch.py
 
       - name: role ids render as display and agent identities
         run: |
@@ -180,6 +181,9 @@ jobs:
       - uses: actions/checkout@v4
       - name: python version
         run: python3 -c 'import sys; assert sys.version_info >= (3, 11), sys.version; print(sys.version)'
+
+      - name: an uninstalled vault ignores skills in the home directory
+        run: python3 tools/test_lint.py
 
       - name: a fresh vault lints clean
         run: |

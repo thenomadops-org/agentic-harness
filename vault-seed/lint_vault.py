@@ -28,8 +28,11 @@ ones where a rule from one zone gets applied to another.
 8.  **brief length** — capped deliberately. A brief that grows to fill the
     space stops being read, and an unread brief is worse than none because it
     looks like reporting happened.
-9.  **skills in the vault** — a skill in `~/.claude/skills/` that is not a
-    symlink into this vault is untracked, unsynced, and invisible to history.
+9.  **skills in the vault** — once this vault is linked from the home
+    directory, a skill in `~/.claude/skills/` that is not a symlink into
+    this vault is untracked, unsynced, and invisible to history. When
+    nothing there points at this vault, the home directory's own skills
+    are not this install, and the check does not apply.
 10. **frontmatter** — a note without it cannot be found by the properties that
     make retrieval work.
 
@@ -123,6 +126,26 @@ def walk_notes():
                 text = handle.read()
             by_name[name[:-3]] = (relative, text, parse_frontmatter(text))
     return by_name, paths
+
+
+def _inside(path, root):
+    """True when path is root or a file inside it. A sibling prefix is not."""
+    root = os.path.realpath(root)
+    path = os.path.realpath(path)
+    return path == root or path.startswith(root + os.sep)
+
+
+def _installed_here(home, vault):
+    """True when a link under the home directory points into this vault."""
+    for label in ("agents", "skills", "commands"):
+        directory = os.path.join(home, ".claude", label)
+        if not os.path.isdir(directory):
+            continue
+        for entry in os.listdir(directory):
+            full = os.path.join(directory, entry)
+            if os.path.islink(full) and _inside(full, vault):
+                return True
+    return False
 
 
 def main():
@@ -271,27 +294,32 @@ def main():
     else:
         ok("brief length", f"within {BRIEF_BULLET_CAP} bullets")
 
-    # 8 — skills must live here
+    # 8 — skills must live here, once this vault is installed.
     # CLAUDE_HOME mirrors install.py's --home so the pair can be tested
     # together. Unset, it is the real home — which is the only thing that
     # matters in normal use.
+    # A vault that was never linked leaves the home directory alone. Its
+    # skills belong to whatever else is installed there.
     claude_home = os.environ.get("CLAUDE_HOME", os.path.expanduser("~"))
-    installed = os.path.join(claude_home, ".claude", "skills")
-    strays = []
-    if os.path.isdir(installed):
-        for entry in sorted(os.listdir(installed)):
-            full = os.path.join(installed, entry)
-            if not os.path.islink(full):
-                strays.append(f"{entry}  (not a symlink)")
-            elif not os.path.realpath(full).startswith(os.path.realpath(VAULT)):
-                strays.append(f"{entry}  -> {os.path.realpath(full)}")
-    if strays:
-        fail(f"skills outside the vault ({len(strays)})",
-             strays[:8]
-             + ["A skill in ~/.claude is untracked, unsynced, and invisible to",
-                "this vault's history. Move it here and re-run install-org."])
+    if not _installed_here(claude_home, VAULT):
+        ok("skills in the vault", "not installed into the home directory")
     else:
-        ok("skills in the vault", "every installed skill links here")
+        installed = os.path.join(claude_home, ".claude", "skills")
+        strays = []
+        if os.path.isdir(installed):
+            for entry in sorted(os.listdir(installed)):
+                full = os.path.join(installed, entry)
+                if not os.path.islink(full):
+                    strays.append(f"{entry}  (not a symlink)")
+                elif not _inside(os.path.realpath(full), VAULT):
+                    strays.append(f"{entry}  -> {os.path.realpath(full)}")
+        if strays:
+            fail(f"skills outside the vault ({len(strays)})",
+                 strays[:8]
+                 + ["A skill in ~/.claude is untracked, unsynced, and invisible to",
+                    "this vault's history. Move it here and re-run install-org."])
+        else:
+            ok("skills in the vault", "every installed skill links here")
 
     # 9 — frontmatter
     bare = [

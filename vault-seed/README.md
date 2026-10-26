@@ -80,8 +80,11 @@ vault, and is symlinked into `~/.claude/skills/` — never created directly in
 `~/.claude/`, where it would be untracked, unsynced, and invisible to the
 vault's own history.
 
-`install-org` creates those links and verifies them. The lint fails on a skill
-in `~/.claude/skills/` that is not a symlink pointing into this vault.
+`install-org` creates those links and verifies them. Once this vault is
+linked from the home directory, the lint fails on a skill in
+`~/.claude/skills/` that is not a symlink pointing into this vault. A home
+directory that does not link this vault is not this install, and the lint
+does not judge it.
 
 ## Git
 
