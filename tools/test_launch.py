@@ -405,9 +405,15 @@ class EngineeringGridTests(unittest.TestCase):
 
     def test_eng_window_labels(self):
         self.assertEqual(launch._eng_window_number("eng", "eng"), 1)
+        self.assertEqual(launch._eng_window_number("eng-2", "eng"), 2)
         self.assertEqual(launch._eng_window_number("eng-3", "eng"), 3)
-        for label in ("theside", "eng-1", "eng-x", "bo-eng", "engineering", None):
-            self.assertIsNone(launch._eng_window_number(label, "eng"))
+        self.assertEqual(launch._eng_window_number("eng-12", "eng"), 12)
+        for label in (
+            "theside", "eng-1", "eng-x", "bo-eng", "engineering", None,
+            "engineering-x", "my-eng", "eng-2-old", "x-eng-5",
+            "eng-OPS-368", "ENG", "eng-3x", "",
+        ):
+            self.assertIsNone(launch._eng_window_number(label, "eng"), label)
 
     def test_five_launches_fill_one_grid_then_open_eng_2(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -418,34 +424,40 @@ class EngineeringGridTests(unittest.TestCase):
             state = os.path.join(tmp, "herdr-state.json")
             # A workspace that already exists under another label must be
             # left exactly as it is.
-            existing = {
-                "workspaces": [{
-                    "workspace_id": "w4", "label": "theside", "tab_id": "w4:t1",
-                    "panes": [{"pane_id": "w4:p1", "rect": {
-                        "x": 0, "y": 0, "width": 200, "height": 60}}],
-                }],
-                "next": 1,
-            }
+            # Labels that merely contain the prefix are not engineering windows.
+            # eng-2-old would match an unanchored search for eng-N.
+            untouched = [
+                _grid_workspace("w4", "theside", ["w4:p1"]),
+                _grid_workspace("wx", "engineering-x", ["wx:p1"]),
+                _grid_workspace("wm", "my-eng", ["wm:p1"]),
+                _grid_workspace("wo", "eng-2-old", ["wo:p1"]),
+            ]
+            existing = {"workspaces": untouched, "next": 1}
             with open(state, "w", encoding="utf-8") as handle:
                 json.dump(existing, handle)
             personas = [
                 "engineer-1", "engineer-2", "ios-engineer",
                 "android-engineer", "devops",
             ]
+            recorded = []
             for persona in personas:
-                code, output, _rows = _launch(
+                code, output, rows = _launch(
                     home, vault,
                     [persona, "OPS-370", "build it", "--vault", vault],
                     ["grok"],
                     grid_state=state,
                 )
                 self.assertEqual(code, 0, output)
+                recorded.extend(rows)
                 shutil.rmtree(os.path.join(home, "bin"))
             with open(state, encoding="utf-8") as handle:
                 final = json.load(handle)
             by_label = {w["label"]: w for w in final["workspaces"]}
-            self.assertEqual(sorted(by_label), ["eng", "eng-2", "theside"])
-            self.assertEqual(by_label["theside"], existing["workspaces"][0])
+            self.assertEqual(sorted(by_label), [
+                "eng", "eng-2", "eng-2-old", "engineering-x", "my-eng", "theside",
+            ])
+            for workspace in untouched:
+                self.assertEqual(by_label[workspace["label"]], workspace)
             eng = by_label["eng"]["panes"]
             self.assertEqual(len(eng), 4)
             corners = sorted((p["rect"]["x"], p["rect"]["y"]) for p in eng)
@@ -454,12 +466,207 @@ class EngineeringGridTests(unittest.TestCase):
                 self.assertEqual(pane["rect"]["width"], 100)
                 self.assertEqual(pane["rect"]["height"], 30)
                 self.assertEqual(pane["cwd"], os.path.realpath(vault))
+            named_at = {(p["rect"]["x"], p["rect"]["y"]): p.get("name") for p in eng}
+            self.assertEqual(named_at[(0, 0)], "engineer-1-OPS-370")
+            self.assertEqual(named_at[(100, 0)], "engineer-2-OPS-370")
+            self.assertEqual(named_at[(0, 30)], "ios-engineer-OPS-370")
+            self.assertEqual(named_at[(100, 30)], "android-engineer-OPS-370")
             self.assertEqual(len(by_label["eng-2"]["panes"]), 1)
             self.assertEqual(
                 by_label["eng-2"]["panes"][0].get("name"), "devops-OPS-370",
             )
-            names = sorted(p.get("name") for p in eng)
-            self.assertEqual(len(set(names)), 4)
+            focused = [
+                row["argv"] for row in recorded
+                if row["argv"][1:3] in (["workspace", "create"], ["pane", "split"])
+            ]
+            self.assertEqual(len(focused), 5)
+            for argv in focused:
+                self.assertIn("--no-focus", argv)
+
+    def test_active_tab_is_split_and_an_older_tab_is_not(self):
+        active, older = "w1:t-live", "w1:t-old"
+        state = {
+            "workspaces": [{
+                "workspace_id": "w1",
+                "label": "eng",
+                "tab_id": active,
+                "panes": [
+                    _grid_pane("w1:p-old", tab_id=older),
+                    _grid_pane("w1:p-live", tab_id=active),
+                ],
+            }],
+            "next": 1,
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            code, pane_id, final, _rows = _grid_open(tmp, state)
+        self.assertEqual(code, 0)
+        panes = {p["pane_id"]: p for p in final["workspaces"][0]["panes"]}
+        self.assertIn(pane_id, panes)
+        self.assertEqual(panes["w1:p-old"]["rect"], _FULL_RECT)
+        self.assertEqual(panes["w1:p-live"]["rect"]["width"], 100)
+        self.assertEqual(panes[pane_id]["tab_id"], active)
+
+    def test_windows_fill_in_label_order_then_number_past_the_highest(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            # Listed eng-3 first. The free slot in eng is still the one taken.
+            code, _pane, final, _rows = _grid_open(tmp, {
+                "workspaces": [
+                    _grid_workspace("w3", "eng-3", ["w3:p1"]),
+                    _grid_workspace("w1", "eng", ["w1:p1"]),
+                ],
+                "next": 1,
+            })
+            self.assertEqual(code, 0)
+            by_label = {w["label"]: w for w in final["workspaces"]}
+            self.assertEqual(sorted(by_label), ["eng", "eng-3"])
+            self.assertEqual(len(by_label["eng"]["panes"]), 2)
+            self.assertEqual(len(by_label["eng-3"]["panes"]), 1)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            # eng and eng-2 are full, so the next window is eng-3, not a second eng-2.
+            code, _pane, final, _rows = _grid_open(tmp, {
+                "workspaces": [
+                    _grid_workspace("w1", "eng", [f"w1:p{i}" for i in range(4)]),
+                    _grid_workspace("w2", "eng-2", [f"w2:p{i}" for i in range(4)]),
+                ],
+                "next": 1,
+            })
+            self.assertEqual(code, 0)
+            self.assertEqual(
+                sorted(w["label"] for w in final["workspaces"]),
+                ["eng", "eng-2", "eng-3"],
+            )
+            created = [w for w in final["workspaces"] if w["label"] == "eng-3"]
+            self.assertEqual(len(created), 1)
+            self.assertEqual(len(created[0]["panes"]), 1)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            # A gap must not be reused. eng plus a full eng-3 numbers the new
+            # window eng-4. Counting the windows would collide on eng-3.
+            code, _pane, final, _rows = _grid_open(tmp, {
+                "workspaces": [
+                    _grid_workspace("w3", "eng-3", [f"w3:p{i}" for i in range(4)]),
+                    _grid_workspace("w1", "eng", [f"w1:p{i}" for i in range(4)]),
+                ],
+                "next": 1,
+            })
+            self.assertEqual(code, 0)
+            labels = sorted(w["label"] for w in final["workspaces"])
+            self.assertEqual(labels, ["eng", "eng-3", "eng-4"])
+            self.assertEqual(
+                len([w for w in final["workspaces"] if w["label"] == "eng-3"]), 1,
+            )
+
+    def test_herdr_errors_do_not_open_a_stray_window(self):
+        untouched = _grid_workspace("w4", "theside", ["w4:p1"])
+        with tempfile.TemporaryDirectory() as tmp:
+            code, pane_id, final, rows = _grid_open(tmp, {
+                "workspaces": [untouched],
+                "next": 1,
+                "fail": {"workspace list": 3},
+            })
+            self.assertEqual((code, pane_id), (3, None))
+            self.assertEqual(final["workspaces"], [untouched])
+            self.assertFalse(any(row["argv"][1:3] == ["workspace", "create"] for row in rows))
+
+        with tempfile.TemporaryDirectory() as tmp:
+            eng = _grid_workspace("w1", "eng", ["w1:p1"])
+            eng2 = _grid_workspace("w2", "eng-2", ["w2:p1"])
+            code, pane_id, final, _rows = _grid_open(tmp, {
+                "workspaces": [eng, eng2],
+                "next": 1,
+                "fail_pane_list": ["w1"],
+            })
+            self.assertEqual(code, 0)
+            self.assertEqual(pane_id, "w2:p2")
+            by_id = {w["workspace_id"]: w for w in final["workspaces"]}
+            self.assertEqual(len(by_id["w1"]["panes"]), 1)
+            self.assertEqual(len(by_id["w2"]["panes"]), 2)
+            self.assertNotIn("eng-3", {w["label"] for w in final["workspaces"]})
+
+        with tempfile.TemporaryDirectory() as tmp:
+            eng = _grid_workspace("w1", "eng", ["w1:p1"])
+            code, pane_id, final, rows = _grid_open(tmp, {
+                "workspaces": [eng],
+                "next": 1,
+                "fail": {"pane split": 3},
+            })
+            self.assertEqual((code, pane_id), (3, None))
+            self.assertEqual(len(final["workspaces"]), 1)
+            self.assertEqual(len(final["workspaces"][0]["panes"]), 1)
+            self.assertFalse(any(row["argv"][1:3] == ["workspace", "create"] for row in rows))
+
+    def test_a_full_pane_count_is_not_split(self):
+        # pane_count says this window is full even though one pane is stored.
+        # The pre-check must skip it. The free eng-2 window takes the session.
+        with tempfile.TemporaryDirectory() as tmp:
+            reported_full = _grid_workspace("w1", "eng", ["w1:p1"])
+            reported_full["pane_count"] = 4
+            free = _grid_workspace("w2", "eng-2", ["w2:p1"])
+            code, pane_id, final, rows = _grid_open(tmp, {
+                "workspaces": [reported_full, free],
+                "next": 1,
+            })
+            self.assertEqual(code, 0)
+            self.assertEqual(pane_id, "w2:p2")
+            by_id = {w["workspace_id"]: w for w in final["workspaces"]}
+            self.assertEqual(by_id["w1"]["panes"], reported_full["panes"])
+            self.assertEqual(len(by_id["w2"]["panes"]), 2)
+            listed = [
+                row["argv"][row["argv"].index("--workspace") + 1]
+                for row in rows
+                if row["argv"][1:3] == ["pane", "list"]
+            ]
+            self.assertNotIn("w1", listed)
+            self.assertIn("w2", listed)
+
+
+_FULL_RECT = {"x": 0, "y": 0, "width": 200, "height": 60}
+
+
+def _grid_pane(pane_id, tab_id=None, rect=None):
+    pane = {"pane_id": pane_id, "rect": dict(rect or _FULL_RECT)}
+    if tab_id:
+        pane["tab_id"] = tab_id
+    return pane
+
+
+def _grid_workspace(workspace_id, label, pane_ids):
+    return {
+        "workspace_id": workspace_id,
+        "label": label,
+        "tab_id": workspace_id + ":t1",
+        "panes": [_grid_pane(pane_id) for pane_id in pane_ids],
+    }
+
+
+def _grid_open(tmp, state):
+    """Point a fake herdr at state and open one engineering-window slot."""
+    vault = os.path.join(tmp, "vault")
+    home = os.path.join(tmp, "home")
+    os.makedirs(vault)
+    os.makedirs(home)
+    state_path = os.path.join(tmp, "herdr-state.json")
+    with open(state_path, "w", encoding="utf-8") as handle:
+        json.dump(state, handle)
+    record = _fake_path(os.path.join(home, "bin"), [], grid_state=state_path)
+    saved = os.environ.copy()
+    os.environ["HOME"] = home
+    os.environ["PATH"] = os.path.join(home, "bin")
+    os.environ["HERDR_STATE"] = state_path
+    os.environ["HERDR_RECORD"] = record
+    try:
+        code, pane_id = launch._open_grid_pane(os.path.realpath(vault))
+    finally:
+        os.environ.clear()
+        os.environ.update(saved)
+    with open(state_path, encoding="utf-8") as handle:
+        final = json.load(handle)
+    rows = []
+    if os.path.exists(record):
+        with open(record, encoding="utf-8") as handle:
+            rows = [json.loads(line) for line in handle if line.strip()]
+    return code, pane_id, final, rows
 
 
 def _launch(home, vault, args, vendor_commands, through_shell=False, grid_state=None):
@@ -563,12 +770,22 @@ def find(pane_id):
             if p['pane_id'] == pane_id:
                 return w, p
     raise SystemExit(1)
+def pane_tab(w, p):
+    return p.get('tab_id') or w['tab_id']
+def refuse(name):
+    code = (state.get('fail') or {}).get(name)
+    if code:
+        raise SystemExit(code)
 def out(result):
     json.dump({'result': result}, sys.stdout)
 if args[:2] == ['workspace', 'list']:
-    out({'workspaces': [{'workspace_id': w['workspace_id'], 'label': w['label'],
-        'active_tab_id': w['tab_id'], 'pane_count': len(w['panes'])}
-        for w in state['workspaces']]})
+    refuse('workspace list')
+    rows = []
+    for w in state['workspaces']:
+        count = w['pane_count'] if 'pane_count' in w else len(w['panes'])
+        rows.append({'workspace_id': w['workspace_id'], 'label': w['label'],
+            'active_tab_id': w['tab_id'], 'pane_count': count})
+    out({'workspaces': rows})
 elif args[:2] == ['workspace', 'create']:
     n = state['next']; state['next'] += 1
     wid = 'wt%d' % n
@@ -579,12 +796,19 @@ elif args[:2] == ['workspace', 'create']:
     save()
     out({'root_pane': {'pane_id': pane['pane_id']}, 'tab': {'tab_id': wid + ':t1'}})
 elif args[:2] == ['pane', 'list']:
-    w = [w for w in state['workspaces'] if w['workspace_id'] == opt('--workspace')][0]
-    out({'panes': [{'pane_id': p['pane_id'], 'tab_id': w['tab_id']} for p in w['panes']]})
+    refuse('pane list')
+    wid = opt('--workspace')
+    if wid in (state.get('fail_pane_list') or []):
+        raise SystemExit(state.get('fail_pane_list_code') or 4)
+    w = [w for w in state['workspaces'] if w['workspace_id'] == wid][0]
+    out({'panes': [{'pane_id': p['pane_id'], 'tab_id': pane_tab(w, p)} for p in w['panes']]})
 elif args[:2] == ['pane', 'layout']:
-    w, _p = find(opt('--pane'))
-    out({'layout': {'panes': [{'pane_id': p['pane_id'], 'rect': p['rect']} for p in w['panes']]}})
+    w, p = find(opt('--pane'))
+    tab = pane_tab(w, p)
+    same = [q for q in w['panes'] if pane_tab(w, q) == tab]
+    out({'layout': {'panes': [{'pane_id': q['pane_id'], 'rect': q['rect']} for q in same]}})
 elif args[:2] == ['pane', 'split']:
+    refuse('pane split')
     w, p = find(args[2])
     r = dict(p['rect'])
     if opt('--direction') == 'right':
@@ -596,7 +820,7 @@ elif args[:2] == ['pane', 'split']:
         p['rect'] = dict(r, height=half)
         rect = dict(r, y=r['y'] + half, height=r['height'] - half)
     new = {'pane_id': '%s:p%d' % (w['workspace_id'], len(w['panes']) + 1),
-           'cwd': opt('--cwd'), 'rect': rect}
+           'cwd': opt('--cwd'), 'tab_id': pane_tab(w, p), 'rect': rect}
     w['panes'].append(new)
     save()
     out({'pane': {'pane_id': new['pane_id']}})
