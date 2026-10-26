@@ -142,7 +142,7 @@ jobs:
           test -f ${RUNNER_TEMP}/org/.claude/agents/lead.md
           test -f ${RUNNER_TEMP}/org/.claude/agents/engineer-1.md
           test -f ${RUNNER_TEMP}/org/.claude/agents/engineer-2.md
-          grep -q '`engineer-1`' ${RUNNER_TEMP}/org/Team/Team-ORG.md
+          grep -q '| engineer-1 |' ${RUNNER_TEMP}/org/Team/Team-ORG.md
           grep -q '<persona>-<TICKET>' ${RUNNER_TEMP}/org/Team/Team-ORG.md
           echo "role ids and numbered seats rendered as personas"
 
