@@ -7,20 +7,30 @@ coverage-only; it does not run mutation tests. The committed
 10 most recent merged snapshots. Change `window` in that file to tune the
 window (maximum 50).
 
-Before opening or updating a PR, run the measurement suite and record the
-candidate in the same PR:
+For the first metric-gate PR, main has no history yet. CI checks out the PR
+base commit, installs this PR's measurement harness and tests into a temporary
+worktree, and measures that main tree. The history file must mark this as a
+`bootstrap` baseline and include the source workflow run and main commit. The
+gate compares the PR baseline and first candidate against those CI reports;
+there is no empty-history pass. Later PRs read the history from the base commit
+and require the PR copy to preserve its baseline, window, and prior rows.
+
+Before opening or updating a PR after bootstrap, run the measurement suite and
+record the candidate in the same PR:
 
 ```sh
 python3 tools/metric_gate.py measure --out /tmp/coverage.json
 python3 tools/metric_gate.py record --history metrics/coverage-history.json \
-  --metrics /tmp/coverage.json --pr 123 --ref $(git rev-parse --short HEAD)
+  --metrics /tmp/coverage.json --pr 123 --ref "$(git rev-parse --short HEAD)"
 ```
 
 Replace `123` with the PR number and rerun `measure` after changing code. CI
 re-measures the pull request and requires the committed candidate row to match
-those results. On the resulting `main` push, CI confirms that the latest
-recorded row matches the merged tree. Thus the history advances in the PR
-commit and survives runner restarts.
+its percentages and coverage counts. It also compares the history against the
+base commit's copy, allowing only one appended or replaced candidate row. On
+the resulting `main` push, CI confirms that the latest recorded row matches
+the merged tree. Thus the history advances in the PR commit and survives
+runner restarts.
 
 Each metric is compared with the preceding main snapshot using relative
 percentage change; the net is the sum of those relative changes. A decline

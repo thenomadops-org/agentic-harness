@@ -9,6 +9,7 @@ on the resulting main push.
 
 import argparse
 import ast
+import copy
 import datetime
 import json
 import math
@@ -58,7 +59,23 @@ def relative_change(old, new):
     return (new - old) * 100.0 / old
 
 
-def _read_metrics(path):
+def _validate_counts(counts, label="coverage counts"):
+    if not isinstance(counts, dict) or set(counts) != set(METRIC_NAMES):
+        raise MetricGateError(f"{label} are missing or incomplete")
+    clean = {}
+    for name, row in counts.items():
+        if not isinstance(row, dict):
+            raise MetricGateError(f"{label} for {name} are malformed")
+        covered, total = row.get("covered"), row.get("total")
+        if (isinstance(covered, bool) or not isinstance(covered, int) or covered <= 0
+                or isinstance(total, bool) or not isinstance(total, int) or total <= 0
+                or covered > total):
+            raise MetricGateError(f"{label} for {name} are empty or invalid")
+        clean[name] = {"covered": covered, "total": total}
+    return clean
+
+
+def _read_report(path):
     try:
         document = json.loads(Path(path).read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
@@ -66,18 +83,11 @@ def _read_metrics(path):
     if not isinstance(document, dict):
         raise MetricGateError("coverage report must be an object")
     metrics = document.get("metrics")
-    counts = document.get("counts")
-    if not isinstance(counts, dict) or set(counts) != set(METRIC_NAMES):
-        raise MetricGateError("coverage report has missing or zero metric counts")
-    for name, row in counts.items():
-        if not isinstance(row, dict):
-            raise MetricGateError(f"coverage report count for {name} is malformed")
-        covered, total = row.get("covered"), row.get("total")
-        if (isinstance(covered, bool) or not isinstance(covered, int) or covered <= 0
-                or isinstance(total, bool) or not isinstance(total, int) or total <= 0
-                or covered > total):
-            raise MetricGateError(f"coverage report count for {name} is empty or invalid")
-    return validate_metrics(metrics)
+    return validate_metrics(metrics), _validate_counts(document.get("counts"), "coverage report counts")
+
+
+def _read_metrics(path):
+    return _read_report(path)[0]
 
 
 def load_history(path):
@@ -85,6 +95,10 @@ def load_history(path):
         history = json.loads(Path(path).read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
         raise MetricGateError(f"cannot read committed metric history {path}: {exc}") from None
+    return validate_history(history)
+
+
+def validate_history(history):
     if not isinstance(history, dict) or history.get("version") != 1:
         raise MetricGateError("metric history must be a version 1 object")
     window = history.get("window")
@@ -93,7 +107,20 @@ def load_history(path):
     baseline = history.get("baseline")
     if not isinstance(baseline, dict) or not isinstance(baseline.get("ref"), str) or not baseline["ref"]:
         raise MetricGateError("metric history has no baseline ref")
+    if set(baseline) not in ({"ref", "metrics", "counts"},
+                              {"ref", "metrics", "counts", "bootstrap"}):
+        raise MetricGateError("metric history baseline has unexpected fields")
     baseline["metrics"] = validate_metrics(baseline.get("metrics"))
+    baseline["counts"] = _validate_counts(baseline.get("counts"), "baseline counts")
+    if not isinstance(baseline.get("ref"), str) or not baseline["ref"]:
+        raise MetricGateError("metric history baseline has no source ref")
+    bootstrap = baseline.get("bootstrap")
+    if bootstrap is not None:
+        if (not isinstance(bootstrap, dict)
+                or not isinstance(bootstrap.get("source_run"), str)
+                or not bootstrap["source_run"]
+                or bootstrap.get("source_commit") != baseline["ref"]):
+            raise MetricGateError("bootstrap baseline must name its source run and main commit")
     merges = history.get("merges")
     if not isinstance(merges, list):
         raise MetricGateError("metric history merges must be a list")
@@ -103,6 +130,8 @@ def load_history(path):
     for row in merges:
         if not isinstance(row, dict):
             raise MetricGateError("metric history contains a malformed merge row")
+        if set(row) != {"pr", "ref", "metrics", "counts"}:
+            raise MetricGateError("metric history merge row has unexpected fields")
         pr = row.get("pr")
         if isinstance(pr, bool) or not isinstance(pr, int) or pr < 1:
             raise MetricGateError("each metric history row needs a positive PR number")
@@ -112,17 +141,18 @@ def load_history(path):
         if not isinstance(row.get("ref"), str) or not row["ref"]:
             raise MetricGateError(f"metric history PR #{pr} has no run ref")
         row["metrics"] = validate_metrics(row.get("metrics"))
+        row["counts"] = _validate_counts(row.get("counts"), f"PR #{pr} counts")
     return history
 
 
 def record(history_path, metrics_path, pr, ref):
     history = load_history(history_path)
-    metrics = _read_metrics(metrics_path)
+    metrics, counts = _read_report(metrics_path)
     if isinstance(pr, bool) or not isinstance(pr, int) or pr < 1:
         raise MetricGateError("--pr must be a positive pull request number")
     if not ref:
         raise MetricGateError("--ref is required")
-    row = {"pr": pr, "ref": ref, "metrics": metrics}
+    row = {"pr": pr, "ref": ref, "metrics": metrics, "counts": counts}
     merges = history["merges"]
     if merges and merges[-1]["pr"] == pr:
         merges[-1] = row
@@ -132,6 +162,56 @@ def record(history_path, metrics_path, pr, ref):
         merges.append(row)
     history["merges"] = merges[-history["window"]:]
     _write_json(history_path, history)
+
+
+def verify_pr_history(pr_history, current_metrics, current_counts, pr_number,
+                      base_history=None, bootstrap_report=None, base_ref=None,
+                      source_run=None):
+    """Prove a PR changes main's committed history only by its candidate row."""
+    current_metrics = validate_metrics(current_metrics)
+    current_counts = _validate_counts(current_counts, "measured coverage counts")
+    if base_history is None:
+        if (not isinstance(bootstrap_report, tuple) or len(bootstrap_report) != 2
+                or not base_ref or not source_run):
+            raise MetricGateError("first metric history requires a CI-measured main bootstrap")
+        base_metrics, base_counts = bootstrap_report
+        if set(pr_history) != {"version", "window", "baseline", "merges"}:
+            raise MetricGateError("bootstrap history has unexpected fields")
+        baseline = pr_history["baseline"]
+        if pr_history["window"] != DEFAULT_WINDOW:
+            raise MetricGateError("bootstrap history must start with the default 10-merge window")
+        if (baseline.get("ref") != base_ref
+                or baseline.get("metrics") != base_metrics
+                or baseline.get("counts") != base_counts
+                or baseline.get("bootstrap") != {
+                    "source_run": str(source_run),
+                    "source_commit": base_ref,
+                }):
+            raise MetricGateError("bootstrap baseline does not match this CI measurement of main")
+        previous_rows = []
+    else:
+        base = (load_history(base_history) if isinstance(base_history, (str, Path))
+                else validate_history(copy.deepcopy(base_history)))
+        if {key: value for key, value in pr_history.items() if key != "merges"} != {
+                key: value for key, value in base.items() if key != "merges"}:
+            if pr_history["window"] != base["window"]:
+                raise MetricGateError("PR changed the metric history window from main")
+            if pr_history["baseline"] != base["baseline"]:
+                raise MetricGateError("PR changed the metric baseline from main")
+            raise MetricGateError("PR changed metric history metadata from main")
+        previous_rows = base["merges"]
+
+    if not pr_history["merges"]:
+        raise MetricGateError("PR history must append its measured candidate row")
+    row = pr_history["merges"][-1]
+    if row["pr"] != pr_number:
+        raise MetricGateError(f"history candidate is PR #{row['pr']}, expected PR #{pr_number}")
+    if row["metrics"] != current_metrics or row["counts"] != current_counts:
+        raise MetricGateError("candidate history values do not match measured PR coverage")
+    expected_rows = (previous_rows + [row])[-pr_history["window"]:]
+    if pr_history["merges"] != expected_rows:
+        raise MetricGateError("PR must preserve main's earlier history and append only its candidate row")
+    return row
 
 
 def _write_json(path, document):
@@ -424,9 +504,10 @@ def measure(root, output):
     return document
 
 
-def check(history_path, current_path, event_path):
+def check(history_path, current_path, event_path, base_history_path=None,
+          bootstrap_path=None, source_run=None):
     history = load_history(history_path)
-    current = _read_metrics(current_path)
+    current, current_counts = _read_report(current_path)
     try:
         event = json.loads(Path(event_path).read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
@@ -438,8 +519,30 @@ def check(history_path, current_path, event_path):
         if isinstance(pr, bool) or not isinstance(pr, int) or pr < 1:
             raise MetricGateError("pull_request event has no valid PR number")
         body = pull.get("body") or ""
+        base_sha = pull.get("base", {}).get("sha") if isinstance(pull.get("base"), dict) else None
+        head_sha = pull.get("head", {}).get("sha") if isinstance(pull.get("head"), dict) else None
+        if base_history_path:
+            verify_pr_history(
+                history, current, current_counts, pr,
+                base_history=base_history_path,
+            )
+        elif bootstrap_path:
+            verify_pr_history(
+                history, current, current_counts, pr,
+                bootstrap_report=_read_report(bootstrap_path),
+                base_ref=base_sha,
+                source_run=source_run,
+            )
+        else:
+            raise MetricGateError("PR gate must compare against main's committed metric history")
+        if not head_sha or not base_sha:
+            raise MetricGateError("pull_request event is missing its head or base commit")
         problems = evaluate(history, current, "pull_request", pr, body)
     elif event.get("ref") == "refs/heads/main":
+        if not history["merges"]:
+            raise MetricGateError("main has no recorded merge coverage history")
+        if history["merges"][-1]["counts"] != current_counts:
+            raise MetricGateError("main coverage counts do not match the latest committed history row")
         problems = evaluate(history, current, "main")
     else:
         raise MetricGateError(f"event {action!r} is neither a pull request nor a main push")
@@ -467,6 +570,9 @@ def main(argv=None):
     checker.add_argument("--history", required=True)
     checker.add_argument("--current", required=True)
     checker.add_argument("--event", required=True, help="GITHUB_EVENT_PATH JSON")
+    checker.add_argument("--base-history", help="history file extracted from the PR base commit")
+    checker.add_argument("--bootstrap-current", help="CI measurement of main for the first history PR")
+    checker.add_argument("--source-run", help="CI run id that measured the bootstrap baseline")
     args = parser.parse_args(argv)
     try:
         if args.action == "measure":
@@ -475,7 +581,8 @@ def main(argv=None):
         if args.action == "record":
             record(args.history, args.metrics, args.pr, args.ref)
             return 0
-        return check(args.history, args.current, args.event)
+        return check(args.history, args.current, args.event,
+                     args.base_history, args.bootstrap_current, args.source_run)
     except MetricGateError as exc:
         print(f"metric-gate: REFUSED — {exc}", file=sys.stderr)
         return 2
