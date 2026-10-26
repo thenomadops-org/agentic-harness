@@ -39,6 +39,13 @@ A machine enrolled in the board that runs the node client and hosts
 
 ## O
 
+### Owner interface
+
+The role in the owner's chat that files a story, starts it when the owner says
+go, and relays a checked update. Any chat front end may play it. Vendor ids in
+`org/vendors.yaml` name persona CLIs; this role is the chat in front of them.
+The contract is [the owner-interface spec](spec/owner-interface.md).
+
 ### Owner override
 
 A direct instruction from the owner in conversation. It is carried out and
