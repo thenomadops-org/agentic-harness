@@ -21,9 +21,10 @@ destroys the only thing that made it worth having — so this never writes over 
 Soul that exists, and the lint fails if one still looks generated after real
 work has happened.
 
-Nothing is ever deleted. A role removed from `roles.yaml` leaves its files in
-place and gets reported, because "this person no longer exists" is a decision
-with a memory attached, not a cleanup task.
+Orphaned Team directories stay in place and get reported, because authored
+Souls and memory belong to the user. Legacy agent definitions are moved out of
+Claude's active agent directory into `.claude/retired-agents/` with their
+contents preserved, so named agents cannot remain live after migration.
 """
 
 import argparse
@@ -88,6 +89,44 @@ def orphaned_seats(vault, seats):
     )
 
 
+def obsolete_agents(vault, seats):
+    """Return active agent files not generated for the current role seats."""
+    agents = os.path.join(vault, ".claude", "agents")
+    if not os.path.isdir(agents):
+        return []
+    expected = {f"{seat['name'].lower()}.md" for seat in seats}
+    return sorted(
+        os.path.join(agents, name) for name in os.listdir(agents)
+        if name.endswith(".md") and name not in expected
+        and os.path.isfile(os.path.join(agents, name))
+    )
+
+
+def retired_agent_path(vault, source):
+    """Choose a non-active backup path without overwriting existing content."""
+    archive = os.path.join(vault, ".claude", "retired-agents")
+    name = os.path.basename(source)
+    candidate = os.path.join(archive, name)
+    stem, suffix = os.path.splitext(name)
+    index = 1
+    while os.path.lexists(candidate):
+        candidate = os.path.join(archive, f"{stem}-{index}{suffix}")
+        index += 1
+    return candidate
+
+
+def retire_obsolete_agents(vault, seats, dry_run=False):
+    """Move legacy agent definitions out of the active directory, keeping backups."""
+    retired = []
+    for source in obsolete_agents(vault, seats):
+        backup = retired_agent_path(vault, source)
+        if not dry_run:
+            os.makedirs(os.path.dirname(backup), exist_ok=True)
+            shutil.move(source, backup)
+        retired.append((os.path.relpath(source, vault), os.path.relpath(backup, vault)))
+    return retired
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--vault", required=True)
@@ -120,6 +159,7 @@ def main(argv=None):
     seats = render.build_seats(spec, roles, personas, options)
 
     stale = orphaned_seats(vault, seats)
+    old_agents = obsolete_agents(vault, seats)
 
     if args.dry_run:
         print(f"would re-render {len(seats)} persona(s):")
@@ -131,13 +171,23 @@ def main(argv=None):
             print(f"\norphaned Team directories ({len(stale)}) — reported, never removed:")
             for name in stale:
                 print(f"  Team/{name}")
+            print("  Copy any authored Soul or memory content into the matching current persona directory before removing an orphan.")
+        if old_agents:
+            print(f"\nwould retire {len(old_agents)} legacy named agent file(s) with backups:")
+            for source in old_agents:
+                print(f"  {os.path.relpath(source, vault)} -> {os.path.relpath(retired_agent_path(vault, source), vault)}")
         print("\n--dry-run: nothing changed")
         return 0
 
     render.render_org(seats, options, vault, spec)
+    retired_agents = retire_obsolete_agents(vault, seats)
     print(f"re-rendered {len(seats)} seat(s)")
     print("  regenerated: Team-ORG.md, *-Role.md, .claude/agents/*")
     print("  preserved:   *-Soul.md, *-Memory.md, Team-Operating-Agreement.md")
+    if retired_agents:
+        print(f"  retired legacy named agent file(s) with backups ({len(retired_agents)}):")
+        for source, backup in retired_agents:
+            print(f"    {source} -> {backup}")
 
     # Old generated seats are reported as orphans, never removed. Keep all
     # other settings and user-authored fields while dropping retired selectors.
@@ -191,7 +241,8 @@ def main(argv=None):
         for name in stale:
             print(f"  Team/{name}")
         print("  Left in place deliberately so authored Soul and memory content")
-        print("  survives the persona migration. Remove only by explicit choice.")
+        print("  survives the persona migration. Copy authored Soul or memory content")
+        print("  into the matching current persona directory before removing an orphan.")
 
     print("\nNext:")
     print(f"  cd {vault} && python3 .claude/skills/install-org/install.py")

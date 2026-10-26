@@ -26,9 +26,12 @@ A Role file describes what the org decided. A Soul describes who someone became.
 Regenerating the first is correct; regenerating the second erases the only thing
 that made it worth having.
 
-**Nothing is ever deleted.** Remove a role from `roles.yaml` and its old
-`Team/` directory stays, reported as orphaned. It may contain authored Soul,
-memory, or other work. Remove it only by explicit user choice.
+Remove a role from `roles.yaml` and its old `Team/` directory stays, reported
+as orphaned. It may contain an authored Soul, memory, or other work. Before
+removing that directory, copy any authored Soul or memory content into the
+matching current persona directory; update does not move or delete it for you.
+Legacy named agent definitions are retired from `.claude/agents/` into
+`.claude/retired-agents/` with a backup, so they are no longer live agents.
 
 ## Changing the shape of the org
 
@@ -39,8 +42,9 @@ and until then two files would describe the same person differently.
 Role ids are the display and agent ids. Existing configurations may still
 contain legacy display selectors; update removes those obsolete selectors
 after a successful render, drops retired pack selections, and preserves every
-other configuration value. Old generated directories and files are reported
-and left intact, so authored content is not lost during migration.
+other configuration value. Old Team directories are reported and left intact;
+copy any authored Soul or memory into its matching current persona directory
+before you choose to remove an orphan.
 
 Adding a pack adds persona seats with generated Soul files. The user should
 write the Souls as part of onboarding.
