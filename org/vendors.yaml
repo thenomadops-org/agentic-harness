@@ -1,0 +1,40 @@
+# One record per CLI. Adding a vendor is a new record in this file.
+# command is the program started in the herdr pane. model_flag, agent_flag
+# and session_flag are that CLI's own arguments; a null flag is omitted.
+# models are the arguments passed after model_flag, by budget posture and tier.
+# memory_link is a vault-relative path. It points at the one store named by
+# routing.yaml memory_store. A second real directory is a copy and is refused.
+version: 1
+vendors:
+  - id: claude
+    command: claude
+    model_flag: "--model"
+    agent_flag: "--agent"
+    session_flag: "-n"
+    memory_link: ".claude/memory"
+    models:
+      frugal: { lead: sonnet, specialist: sonnet, ic: haiku }
+      balanced: { lead: opus, specialist: sonnet, ic: sonnet }
+      max: { lead: opus, specialist: opus, ic: sonnet }
+
+  - id: codex
+    command: codex
+    model_flag: "--model"
+    agent_flag: null
+    session_flag: null
+    memory_link: ".codex/memory"
+    models:
+      frugal: { lead: gpt-6-sol, specialist: gpt-6-sol, ic: gpt-6-sol }
+      balanced: { lead: gpt-6-sol, specialist: gpt-6-sol, ic: gpt-6-sol }
+      max: { lead: gpt-6-sol, specialist: gpt-6-sol, ic: gpt-6-sol }
+
+  - id: grok
+    command: grok
+    model_flag: "--model"
+    agent_flag: "--agent"
+    session_flag: null
+    memory_link: ".grok/memory"
+    models:
+      frugal: { lead: grok-4.6, specialist: grok-4.6, ic: grok-4.5 }
+      balanced: { lead: grok-4.7, specialist: grok-4.7, ic: grok-4.7-build-fast }
+      max: { lead: grok-4.7, specialist: grok-4.7, ic: grok-4.7 }

@@ -1,0 +1,22 @@
+# Which vendor and model a persona session uses.
+#
+# lead_vendor is the vendor the owner names for the lead. Change the value; the
+# planner reads it and does not hardcode a vendor. Personas that are neither
+# build nor QA use this vendor too.
+# build_vendors is the preference order for implementation personas.
+# qa_vendors is the preference order for QA. When more than one vendor is
+# installed, QA is a different vendor from the one that built the change.
+# With one vendor, QA uses that vendor in its own pane, named qa-<ticket>.
+# usage_rebalance_below is remaining usage as a fraction. At or below this
+# floor the planner moves the session to another installed vendor that is
+# still above the floor. 0.15 means 15% usage left. QA will not move onto
+# the builder while another vendor is installed.
+# memory_store is the one directory every vendor memory_link points at.
+version: 1
+lead_vendor: claude
+build_vendors: [grok, codex]
+build_personas: [engineer, ios-engineer, android-engineer, devops]
+qa_persona: qa
+qa_vendors: [codex, grok, claude]
+usage_rebalance_below: 0.15
+memory_store: ".claude/memory"

@@ -130,6 +130,7 @@ jobs:
           set -e
           python3 tools/persona-boundary-check.py
           python3 tools/test_personas.py
+          python3 tools/test_vendors.py
 
       - name: role ids render as display and agent identities
         run: |
