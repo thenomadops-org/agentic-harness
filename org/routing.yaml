@@ -1,6 +1,6 @@
 # Which vendor and model a persona session uses.
 #
-# lead_vendor is the vendor Chris names for the lead. Change the value; the
+# lead_vendor is the vendor the owner names for the lead. Change the value; the
 # planner reads it and does not hardcode a vendor. Personas that are neither
 # build nor QA use this vendor too.
 # build_vendors is the preference order for implementation personas.

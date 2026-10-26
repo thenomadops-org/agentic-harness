@@ -228,6 +228,35 @@ class VendorTests(unittest.TestCase):
         self.assertNotEqual(qa["pane"], build["pane"])
         self.assertNotEqual(qa["argv"], build["argv"])
 
+    def test_qa_split_holds_for_two_vendors_and_falls_back_for_one(self):
+        # Exactly two installed vendors is already "more than one". A guard
+        # written as len(installed) > 2 lets QA use the builder's vendor.
+        two = ["codex", "grok"]
+        built_by_codex = vendors.plan_session(
+            "qa", "OPS-347", two, builder_vendor="codex",
+        )
+        self.assertEqual(built_by_codex["vendor"], "grok")
+        self.assertEqual(built_by_codex["model"], "grok-4.7")
+        self.assertNotEqual(built_by_codex["model"], "gpt-6-sol")
+
+        built_by_grok = vendors.plan_session(
+            "qa", "OPS-347", two, builder_vendor="grok",
+        )
+        self.assertEqual(built_by_grok["vendor"], "codex")
+        self.assertEqual(built_by_grok["model"], "gpt-6-sol")
+        self.assertNotEqual(built_by_grok["model"], "grok-4.7")
+
+        with self.assertRaises(vendors.VendorError):
+            vendors.plan_session("qa", "OPS-347", two)
+
+        qa = vendors.plan_session(
+            "qa", "OPS-347", ["claude"], builder_vendor="claude",
+        )
+        build = vendors.plan_session("engineer-1", "OPS-347", ["claude"])
+        self.assertEqual(qa["vendor"], "claude")
+        self.assertEqual(qa["pane"], "qa-OPS-347")
+        self.assertNotEqual(qa["pane"], build["pane"])
+
     def test_rebalance_when_usage_left_is_at_or_below_the_floor(self):
         floor = vendors.load_routing()["usage_rebalance_below"]
         self.assertEqual(floor, 0.15)
