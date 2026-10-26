@@ -45,10 +45,10 @@ def plan_session(persona, ticket, installed, goal="", usage=None,
                  routing_path=None, roles_path=None, vault=None):
     """Choose a vendor and model and return the herdr argv. Do not run it.
 
-    When vault is set, a vendor with no agent flag gets a goal prefixed with
-    an instruction to read and adopt that vault's persona file. A vendor with
-    agent_file set gets that file as its agent argument. The pane id and the
-    vendor command stay as planned.
+    When vault is set, a vendor with agent_file set gets that vault's persona
+    file as its agent argument. A vendor with instructions_flag set gets the
+    same file as a config override, encoded as one TOML string. The pane id
+    and the vendor command stay as planned.
     """
     catalog = load_vendors(vendors_path)
     routing = load_routing(routing_path)
@@ -189,6 +189,16 @@ def _validate_vendors(document):
             raise VendorError(f"{ident} agent_file must be true or false")
         if agent_file and not record.get("agent_flag"):
             raise VendorError(f"{ident} agent_file needs an agent_flag")
+        for name in ("instructions_flag", "instructions_config"):
+            value = record.get(name)
+            if value is not None and (not isinstance(value, str) or not value):
+                raise VendorError(f"{ident} {name} must be a string or null")
+        if (record.get("instructions_flag") is None) != (
+            record.get("instructions_config") is None
+        ):
+            raise VendorError(
+                f"{ident} needs both instructions_flag and instructions_config, or neither"
+            )
         models = record.get("models")
         if not isinstance(models, dict):
             raise VendorError(f"{ident} needs models")
@@ -320,6 +330,46 @@ def _persona_file(vault, persona):
     return os.path.join(os.path.realpath(vault), ".claude", "agents", persona + ".md")
 
 
+def _persona_body(vault, persona):
+    path = _persona_file(vault, persona)
+    try:
+        with open(path, encoding="utf-8") as handle:
+            body = handle.read()
+    except (OSError, UnicodeError) as exc:
+        raise VendorError(
+            f"persona file is not readable: .claude/agents/{persona}.md"
+        ) from exc
+    if not body.strip():
+        raise VendorError(f"persona file is empty: .claude/agents/{persona}.md")
+    return body
+
+
+def _toml_basic_string(text):
+    """Encode text as a TOML basic string, so a config value keeps every character."""
+    pieces = ['"']
+    for char in text:
+        if char == "\\":
+            pieces.append("\\\\")
+        elif char == '"':
+            pieces.append('\\"')
+        elif char == "\b":
+            pieces.append("\\b")
+        elif char == "\t":
+            pieces.append("\\t")
+        elif char == "\n":
+            pieces.append("\\n")
+        elif char == "\f":
+            pieces.append("\\f")
+        elif char == "\r":
+            pieces.append("\\r")
+        elif ord(char) < 32:
+            pieces.append("\\u%04x" % ord(char))
+        else:
+            pieces.append(char)
+    pieces.append('"')
+    return "".join(pieces)
+
+
 def _argv(record, persona, pane, model, goal, vault=None):
     argv = ["herdr", "pane", "run", pane, record["command"], record["model_flag"], model]
     if record.get("agent_flag"):
@@ -328,10 +378,12 @@ def _argv(record, persona, pane, model, goal, vault=None):
         else:
             agent = persona
         argv.extend([record["agent_flag"], agent])
-    elif vault:
-        path = _persona_file(vault, persona)
-        instruction = f"Read and adopt {path} before any other work."
-        goal = instruction if not goal else instruction + "\n" + goal
+    elif vault and record.get("instructions_flag"):
+        body = _persona_body(vault, persona)
+        argv.extend([
+            record["instructions_flag"],
+            record["instructions_config"] + "=" + _toml_basic_string(body),
+        ])
     if record.get("session_flag"):
         argv.extend([record["session_flag"], pane])
     if goal:

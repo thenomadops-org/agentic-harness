@@ -12,6 +12,7 @@ import os
 import shlex
 import stat
 import tempfile
+import tomllib
 import unittest
 
 import launch
@@ -75,15 +76,28 @@ class LaunchTests(unittest.TestCase):
             self.assertIn('"', received[-1])
             self.assertNotIn("test", received)
 
-    def test_codex_goal_tells_the_session_to_adopt_its_persona_file(self):
-        # Codex has no agent flag. The pane shell must still receive one goal
-        # argument that names the vault persona file and keeps the real goal.
+    def test_codex_loads_the_persona_file_as_developer_instructions(self):
+        # Codex has no agent flag. It injects -c/--config developer_instructions
+        # into the developer message before the user prompt. A goal that only
+        # names the persona file does not. The value is parsed as TOML, and a
+        # value that fails to parse is kept raw, which can rewrite a file that
+        # is itself valid TOML. This fails unless the parsed override equals
+        # the persona file.
         goal = 'review the "change"'
+        body = (
+            '# persona qa\n'
+            'You are "qa".\n'
+            "Don't drop this: PERSONA_BODY_MARKER_347\n"
+        )
+        decoy = "DECOY_AGENTS_NOT_THE_PERSONA\n"
         with tempfile.TemporaryDirectory() as tmp:
             vault = os.path.join(tmp, "vault")
             home = os.path.join(tmp, "home")
             os.makedirs(vault)
             os.makedirs(home)
+            _write_persona(vault, "qa", body)
+            with open(os.path.join(vault, "AGENTS.md"), "w", encoding="utf-8") as handle:
+                handle.write(decoy)
             code, _output, _rows = _launch(
                 home, vault,
                 ["qa", "OPS-347", goal, "--vault", vault],
@@ -92,19 +106,38 @@ class LaunchTests(unittest.TestCase):
             )
             self.assertEqual(code, 0)
             received = _vendor_args(home)
-            persona = os.path.join(
-                os.path.realpath(vault), ".claude", "agents", "qa.md",
-            )
-            self.assertEqual(received[-1].count(persona), 1)
-            self.assertIn("Read and adopt", received[-1])
-            self.assertIn(goal, received[-1])
+            loaded, used_raw = _codex_developer_instructions(received)
+            self.assertFalse(used_raw)
+            self.assertEqual(loaded, body)
+            self.assertNotIn(decoy.strip(), loaded)
+            self.assertEqual(received[-1], goal)
             self.assertIn(" ", received[-1])
             self.assertIn('"', received[-1])
             self.assertNotIn("change", received[:-1])
+            with open(os.path.join(vault, "AGENTS.md"), encoding="utf-8") as handle:
+                self.assertEqual(handle.read(), decoy)
+            self.assertFalse(os.path.exists(os.path.join(home, ".claude")))
+            self.assertFalse(os.path.exists(os.path.join(home, ".codex")))
             plan = vendors.plan_session(
                 "qa", "OPS-347", ["codex"], goal=goal, vault=os.path.realpath(vault),
             )
             self.assertEqual(received, plan["argv"][5:])
+
+    def test_codex_launch_fails_when_the_persona_file_is_missing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            vault = os.path.join(tmp, "vault")
+            home = os.path.join(tmp, "home")
+            os.makedirs(vault)
+            os.makedirs(home)
+            code, _output, rows = _launch(
+                home, vault,
+                ["qa", "OPS-347", "review it", "--vault", vault],
+                ["codex"],
+                through_shell=True,
+            )
+            self.assertNotEqual(code, 0)
+            self.assertEqual(rows, [])
+            self.assertFalse(os.path.exists(os.path.join(home, "bin", "vendor.jsonl")))
 
     def test_grok_agent_flag_is_the_vault_persona_file(self):
         # A bare --agent engineer-1 does not load the vault definition.
@@ -176,6 +209,7 @@ class LaunchTests(unittest.TestCase):
             home = os.path.join(tmp, "home")
             os.makedirs(vault)
             os.makedirs(home)
+            _write_persona(vault, "engineer-1", "You are engineer-1.\n")
             code, _output, rows = _launch(
                 home, vault,
                 [
@@ -308,6 +342,38 @@ def _launch(home, vault, args, vendor_commands, through_shell=False):
         with open(record, encoding="utf-8") as handle:
             rows = [json.loads(line) for line in handle if line.strip()]
     return code, stdout.getvalue(), rows
+
+
+def _write_persona(vault, persona, body):
+    directory = os.path.join(vault, ".claude", "agents")
+    os.makedirs(directory, exist_ok=True)
+    with open(os.path.join(directory, persona + ".md"), "w", encoding="utf-8") as handle:
+        handle.write(body)
+
+
+def _codex_developer_instructions(argv):
+    """Return (text, used_raw) for Codex's last developer_instructions override.
+
+    Codex parses the value of -c/--config as TOML and uses the raw string only
+    when that parse fails. Unknown keys are ignored, so a prefix in the user
+    prompt does not count as a loaded persona.
+    """
+    found = None
+    index = 0
+    while index < len(argv):
+        if argv[index] in ("-c", "--config") and index + 1 < len(argv):
+            key, sep, raw = argv[index + 1].partition("=")
+            if sep and key == "developer_instructions":
+                try:
+                    found = (tomllib.loads("v = " + raw)["v"], False)
+                except (tomllib.TOMLDecodeError, KeyError):
+                    found = (raw, True)
+            index += 2
+            continue
+        index += 1
+    if found is None:
+        raise AssertionError("Codex developer_instructions were not loaded")
+    return found
 
 
 def _vendor_args(home):
