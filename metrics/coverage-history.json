@@ -71,6 +71,29 @@
       },
       "pr": 12,
       "ref": "42a39524975f5a8360d8f58b53b7c04cef770bff"
+    },
+    {
+      "counts": {
+        "go_sdlc_metrics": {
+          "covered": 710,
+          "total": 853
+        },
+        "python_plugin": {
+          "covered": 777,
+          "total": 974
+        },
+        "python_tools": {
+          "covered": 2403,
+          "total": 3317
+        }
+      },
+      "metrics": {
+        "go_sdlc_metrics": 83.2356389214537,
+        "python_plugin": 79.7741273100616,
+        "python_tools": 72.4449804039795
+      },
+      "pr": 13,
+      "ref": "8f266ef0330e09de9f2714b74f85a344e538d0b7"
     }
   ],
   "version": 1,
