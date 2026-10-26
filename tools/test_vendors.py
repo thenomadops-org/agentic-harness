@@ -433,6 +433,29 @@ class VendorTests(unittest.TestCase):
                     self.assertEqual(handle.read(), "grok\n")
             self.assertEqual(_real_memory_dirs(vault), 1)
 
+    def test_identical_legacy_memories_collapse_without_loss(self):
+        with tempfile.TemporaryDirectory() as vault:
+            codex = os.path.join(vault, ".codex", "memory")
+            grok = os.path.join(vault, ".grok", "memory")
+            os.makedirs(codex)
+            os.makedirs(grok)
+            with open(os.path.join(codex, "same.md"), "w", encoding="utf-8") as handle:
+                handle.write("both\n")
+            with open(os.path.join(grok, "same.md"), "w", encoding="utf-8") as handle:
+                handle.write("both\n")
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output):
+                vendors.bind_shared_memory(vault)
+            store = os.path.join(vault, ".claude", "memory")
+            self.assertEqual(_memory_bodies(store), ["both\n"])
+            self.assertNotIn("kept both", output.getvalue())
+            self.assertFalse(os.path.exists(os.path.join(store, "same-grok.md")))
+            for link in (codex, grok):
+                self.assertTrue(os.path.islink(link))
+                with open(os.path.join(link, "same.md"), encoding="utf-8") as handle:
+                    self.assertEqual(handle.read(), "both\n")
+            self.assertEqual(_real_memory_dirs(vault), 1)
+
     def test_setup_and_update_bind_the_shared_store(self):
         with tempfile.TemporaryDirectory() as vault:
             output = io.StringIO()
