@@ -77,6 +77,22 @@ cd my-org && claude
 > /setup-my-org
 ```
 
+## Lead assignment
+
+The owner names the lead explicitly; quota pressure never swaps the holder.
+Record an assignment with the owner's exact words in quotation marks. This
+updates both `state/lead.md` and `org/routing.yaml`:
+
+```bash
+bin/hx lock lead --holder grok --quote '"Bo holds the lead role per design v3"'
+bin/hx lead brief
+bin/hx lead handoff --to grok --dry-run
+```
+
+Handoff sends the brief to one unambiguous vendor pane and leaves the recorded
+lead holder unchanged. At 15% remaining quota, the lead decides how to route
+work and posts the call with `hx chat post`.
+
 ## Layout
 
 ```

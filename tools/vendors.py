@@ -79,7 +79,11 @@ def plan_session(persona, ticket, installed, goal="", usage=None,
     below_floor = False
     # A missing reading is not evidence. Stay put when the assigned vendor has
     # no usage number, and only move to a vendor whose reading is above the floor.
-    if _exhausted(usage, assigned, floor):
+    if _exhausted(usage, assigned, floor) and route == "lead":
+        # The owner names the lead; quota pressure is a decision signal for the
+        # lead, not an automatic transfer of authority to another vendor.
+        below_floor = True
+    elif _exhausted(usage, assigned, floor):
         alternative = next(
             (
                 vendor_id for vendor_id in chosen
