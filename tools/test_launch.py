@@ -9,6 +9,7 @@ import contextlib
 import io
 import json
 import os
+import re
 import shlex
 import stat
 import tempfile
@@ -128,7 +129,10 @@ class LaunchTests(unittest.TestCase):
         # discards the rest. Inlining the persona makes that line longer, so
         # the shell runs a cut command and returns without an answer. The
         # marker sits at the end, where the cut lands. A goal that begins
-        # with "-" is an option unless it follows "--".
+        # with "-" is an option unless it follows "--". The shell reads a
+        # staged argument and removes that file before the vendor starts.
+        # The file is still there when this launch returns if the command
+        # only cats it.
         goal = "-report the role id"
         body = (
             'You are "qa".\n'
@@ -138,18 +142,43 @@ class LaunchTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             vault = os.path.join(tmp, "vault")
             home = os.path.join(tmp, "home")
+            stage = os.path.join(tmp, "stage")
             os.makedirs(vault)
             os.makedirs(home)
+            os.makedirs(stage)
             _write_persona(vault, "qa", body)
-            code, _output, rows = _launch(
-                home, vault,
-                ["qa", "OPS-347", goal, "--vault", vault],
-                ["codex"],
-                through_shell=True,
-            )
+            previous_tmpdir = os.environ.get("TMPDIR")
+            previous_tempdir = tempfile.tempdir
+            os.environ["TMPDIR"] = stage
+            # tempfile caches the first directory it uses. Clear that so this
+            # launch writes the staged argument under stage.
+            tempfile.tempdir = None
+            try:
+                code, _output, rows = _launch(
+                    home, vault,
+                    ["qa", "OPS-347", goal, "--vault", vault],
+                    ["codex"],
+                    through_shell=True,
+                )
+            finally:
+                tempfile.tempdir = previous_tempdir
+                if previous_tmpdir is None:
+                    os.environ.pop("TMPDIR", None)
+                else:
+                    os.environ["TMPDIR"] = previous_tmpdir
             self.assertEqual(code, 0)
             typed = _typed_command(rows)
             self.assertLessEqual(len(typed.encode()), 4095)
+            staged = _staged_persona_paths(typed)
+            self.assertTrue(staged, typed)
+            for path in staged:
+                self.assertFalse(
+                    os.path.exists(path),
+                    f"staged file still exists after the pane command: {path}",
+                )
+                self.assertIn(f"/bin/rm {path}", typed)
+                self.assertLess(typed.index(f"/bin/rm {path}"), typed.index(" codex "))
+            self.assertEqual(os.listdir(stage), [])
             received = _vendor_args(home)
             loaded, used_raw = _codex_developer_instructions(received)
             self.assertFalse(used_raw)
@@ -408,6 +437,11 @@ def _codex_developer_instructions(argv):
     if found is None:
         raise AssertionError("Codex developer_instructions were not loaded")
     return found
+
+
+def _staged_persona_paths(typed):
+    """Return absolute paths the pane command reads with /bin/cat."""
+    return re.findall(r"/bin/cat (/[A-Za-z0-9_./-]+)", typed)
 
 
 def _typed_command(rows):

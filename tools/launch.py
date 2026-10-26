@@ -12,8 +12,10 @@ pane by id, so the pane slot of the planned argv is the id just created.
 herdr joins the command tail and sends that line through a shell, so each
 element of the tail is shell-quoted first. A canonical terminal line holds
 4095 bytes and discards the rest, so a longer element is stored in a
-temporary file and the shell reads it back. The vendor still receives the
-full argument. The pane id is not quoted: herdr reads it itself. The plan
+temporary file. The pane command reads that file into a shell variable,
+removes the file, and only then starts the vendor. The vendor still
+receives the full argument. The pane id is not quoted: herdr reads it
+itself. The plan
 is built for this vault. A vendor that takes a definition path is given the
 vault persona file. A vendor that takes developer instructions is given
 that same file as one config override. Nothing is written under the home
@@ -130,6 +132,8 @@ def main(argv=None):
     # The pane shell word-splits this tail. Quote every element so a goal
     # that contains spaces or quotes stays one argument. A line past the
     # terminal's 4095-byte limit is cut and the vendor never sees the rest.
+    # herdr can return before that shell reads the file, so the shell
+    # itself removes a staged file after reading it.
     try:
         argv[4:] = _pane_shell_tail(argv[4:])
     except vendors.VendorError as exc:
@@ -148,18 +152,35 @@ _SAFE_TEMP_PATH = re.compile(r"\A/[A-Za-z0-9_./-]+\Z")
 def _pane_shell_tail(parts):
     """Quote a pane command so the typed line fits in a terminal buffer.
 
-    The shell expands a staged word before it starts the vendor, so the
-    vendor receives the original argument.
+    A staged argument becomes a shell variable. The command reads the file,
+    removes it, and starts the vendor only after that removal.
     """
     quoted = [shlex.quote(part) for part in parts]
     originals = list(parts)
-    while _joined_bytes(quoted) > _PANE_SHELL_LIMIT:
-        index = max(range(len(quoted)), key=lambda i: len(quoted[i].encode()))
-        staged = _stage_shell_word(originals[index])
-        if len(staged.encode()) >= len(quoted[index].encode()):
+    staged = []
+    while _line_bytes(staged, quoted) > _PANE_SHELL_LIMIT:
+        used = {index for index, _path in staged}
+        pending = [i for i in range(len(quoted)) if i not in used]
+        if not pending:
             break
-        quoted[index] = staged
-    return quoted
+        index = max(pending, key=lambda i: len(quoted[i].encode()))
+        path = _write_pane_arg(originals[index])
+        trial = staged + [(index, path)]
+        trial_quoted = list(quoted)
+        trial_quoted[index] = f'"$pane_arg_{len(staged)}"'
+        if _line_bytes(trial, trial_quoted) >= _line_bytes(staged, quoted):
+            os.unlink(path)
+            break
+        quoted[index] = trial_quoted[index]
+        staged = trial
+    if not staged:
+        return quoted
+    return [_pane_arg_prefix(staged)] + quoted
+
+
+def _line_bytes(staged, quoted):
+    parts = ([_pane_arg_prefix(staged)] if staged else []) + list(quoted)
+    return _joined_bytes(parts)
 
 
 def _joined_bytes(quoted):
@@ -168,8 +189,17 @@ def _joined_bytes(quoted):
     return sum(len(part.encode()) for part in quoted) + len(quoted) - 1
 
 
-def _stage_shell_word(text):
-    """Return a short shell word that expands to text."""
+def _pane_arg_prefix(staged):
+    """Shell statements that load each staged argument and delete its file."""
+    statements = []
+    for slot, (_index, path) in enumerate(staged):
+        variable = f"pane_arg_{slot}"
+        statements.append(f"{variable}=$(/bin/cat {path}) && /bin/rm {path}")
+    return " && ".join(statements) + " &&"
+
+
+def _write_pane_arg(text):
+    """Store text in a private file and return its path."""
     handle = tempfile.NamedTemporaryFile(
         prefix="pane-arg-", delete=False,
     )
@@ -181,9 +211,7 @@ def _stage_shell_word(text):
     if _SAFE_TEMP_PATH.fullmatch(handle.name) is None:
         os.unlink(handle.name)
         raise vendors.VendorError("temporary argument path cannot be passed to the shell")
-    # Absolute path: the pane PATH may not include cat, and the substitution
-    # has to expand before the vendor starts.
-    return '"$(/bin/cat ' + handle.name + ')"'
+    return handle.name
 
 
 def _open_pane(vault, pane):
