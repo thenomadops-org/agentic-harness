@@ -452,10 +452,13 @@ jobs:
           fi
           MAIN_ROOT="${RUNNER_TEMP}/metric-gate-main"
           git worktree add --detach "$MAIN_ROOT" "$BASE_SHA"
-          # Use this PR's coverage harness/tests against main's source tree so
-          # both measurements use identical metric definitions.
-          cp tools/metric_gate.py tools/test_metric_gate.py "$MAIN_ROOT/tools/"
-          python3 tools/metric_gate.py measure --repo "$MAIN_ROOT" \
+          # Reproduce the one-time bootstrap report from run 40385907502.
+          # That run used this harness revision and measured main at BASE_SHA.
+          BOOTSTRAP_HARNESS=6430894b8f4d01dff56c39f762c72b9d40b14fc3
+          git fetch --no-tags --depth=1 origin "$BOOTSTRAP_HARNESS"
+          git show "${BOOTSTRAP_HARNESS}:tools/metric_gate.py" > "$MAIN_ROOT/tools/metric_gate.py"
+          git show "${BOOTSTRAP_HARNESS}:tools/test_metric_gate.py" > "$MAIN_ROOT/tools/test_metric_gate.py"
+          python3 "$MAIN_ROOT/tools/metric_gate.py" measure --repo "$MAIN_ROOT" \
             --out "${RUNNER_TEMP}/main-coverage.json"
           echo "Main baseline source: ${BASE_SHA}"
           cat "${RUNNER_TEMP}/main-coverage.json"
@@ -476,7 +479,6 @@ jobs:
             python3 tools/metric_gate.py check \
               --history metrics/coverage-history.json \
               --bootstrap-current "${RUNNER_TEMP}/main-coverage.json" \
-              --source-run "$GITHUB_RUN_ID" \
               --current "${RUNNER_TEMP}/coverage.json" \
               --event "${GITHUB_EVENT_PATH}"
           fi

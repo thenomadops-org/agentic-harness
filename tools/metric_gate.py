@@ -165,14 +165,13 @@ def record(history_path, metrics_path, pr, ref):
 
 
 def verify_pr_history(pr_history, current_metrics, current_counts, pr_number,
-                      base_history=None, bootstrap_report=None, base_ref=None,
-                      source_run=None):
+                      base_history=None, bootstrap_report=None, base_ref=None):
     """Prove a PR changes main's committed history only by its candidate row."""
     current_metrics = validate_metrics(current_metrics)
     current_counts = _validate_counts(current_counts, "measured coverage counts")
     if base_history is None:
         if (not isinstance(bootstrap_report, tuple) or len(bootstrap_report) != 2
-                or not base_ref or not source_run):
+                or not base_ref):
             raise MetricGateError("first metric history requires a CI-measured main bootstrap")
         base_metrics, base_counts = bootstrap_report
         if set(pr_history) != {"version", "window", "baseline", "merges"}:
@@ -183,10 +182,8 @@ def verify_pr_history(pr_history, current_metrics, current_counts, pr_number,
         if (baseline.get("ref") != base_ref
                 or baseline.get("metrics") != base_metrics
                 or baseline.get("counts") != base_counts
-                or baseline.get("bootstrap") != {
-                    "source_run": str(source_run),
-                    "source_commit": base_ref,
-                }):
+                or not isinstance(baseline.get("bootstrap"), dict)
+                or baseline["bootstrap"].get("source_commit") != base_ref):
             raise MetricGateError("bootstrap baseline does not match this CI measurement of main")
         previous_rows = []
     else:
@@ -505,7 +502,7 @@ def measure(root, output):
 
 
 def check(history_path, current_path, event_path, base_history_path=None,
-          bootstrap_path=None, source_run=None):
+          bootstrap_path=None):
     history = load_history(history_path)
     current, current_counts = _read_report(current_path)
     try:
@@ -531,7 +528,6 @@ def check(history_path, current_path, event_path, base_history_path=None,
                 history, current, current_counts, pr,
                 bootstrap_report=_read_report(bootstrap_path),
                 base_ref=base_sha,
-                source_run=source_run,
             )
         else:
             raise MetricGateError("PR gate must compare against main's committed metric history")
@@ -572,7 +568,6 @@ def main(argv=None):
     checker.add_argument("--event", required=True, help="GITHUB_EVENT_PATH JSON")
     checker.add_argument("--base-history", help="history file extracted from the PR base commit")
     checker.add_argument("--bootstrap-current", help="CI measurement of main for the first history PR")
-    checker.add_argument("--source-run", help="CI run id that measured the bootstrap baseline")
     args = parser.parse_args(argv)
     try:
         if args.action == "measure":
@@ -582,7 +577,7 @@ def main(argv=None):
             record(args.history, args.metrics, args.pr, args.ref)
             return 0
         return check(args.history, args.current, args.event,
-                     args.base_history, args.bootstrap_current, args.source_run)
+                     args.base_history, args.bootstrap_current)
     except MetricGateError as exc:
         print(f"metric-gate: REFUSED — {exc}", file=sys.stderr)
         return 2

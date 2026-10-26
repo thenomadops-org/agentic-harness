@@ -8,12 +8,12 @@ coverage-only; it does not run mutation tests. The committed
 window (maximum 50).
 
 For the first metric-gate PR, main has no history yet. CI checks out the PR
-base commit, installs this PR's measurement harness and tests into a temporary
-worktree, and measures that main tree. The history file must mark this as a
-`bootstrap` baseline and include the source workflow run and main commit. The
-gate compares the PR baseline and first candidate against those CI reports;
-there is no empty-history pass. Later PRs read the history from the base commit
-and require the PR copy to preserve its baseline, window, and prior rows.
+base commit and measures that main tree with the harness revision identified
+by the bootstrap report. The history file marks the `bootstrap` baseline with
+that source workflow run and main commit. The gate compares it to CI's main
+measurement, then checks the PR candidate separately; there is no empty-history
+pass. Later PRs read history from the base commit and require the PR copy to
+preserve its baseline, window, and prior rows.
 
 Before opening or updating a PR after bootstrap, run the measurement suite and
 record the candidate in the same PR:

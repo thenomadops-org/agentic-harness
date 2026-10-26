@@ -211,12 +211,12 @@ class MetricGateTests(unittest.TestCase):
         metric_gate.validate_history(doc)
         metric_gate.verify_pr_history(doc, BASE, BASE_COUNTS, 99,
                                       bootstrap_report=(BASE, BASE_COUNTS),
-                                      base_ref=source_ref, source_run=source_run)
+                                      base_ref=source_ref)
         doc["baseline"]["metrics"]["python_tools"] = 79.0
         with self.assertRaisesRegex(metric_gate.MetricGateError, "bootstrap baseline"):
             metric_gate.verify_pr_history(doc, BASE, BASE_COUNTS, 99,
                                           bootstrap_report=(BASE, BASE_COUNTS),
-                                          base_ref=source_ref, source_run=source_run)
+                                          base_ref=source_ref)
 
 
 if __name__ == "__main__":
