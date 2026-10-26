@@ -42,8 +42,14 @@ def load_routing(path=None):
 
 def plan_session(persona, ticket, installed, goal="", usage=None,
                  builder_vendor=None, posture="balanced", vendors_path=None,
-                 routing_path=None, roles_path=None):
-    """Choose a vendor and model and return the herdr argv. Do not run it."""
+                 routing_path=None, roles_path=None, vault=None):
+    """Choose a vendor and model and return the herdr argv. Do not run it.
+
+    When vault is set, a vendor with agent_file set gets that vault's persona
+    file as its agent argument. A vendor with instructions_flag set gets the
+    same file as a config override, encoded as one TOML string. The pane id
+    and the vendor command stay as planned.
+    """
     catalog = load_vendors(vendors_path)
     routing = load_routing(routing_path)
     _validate_routing(routing, catalog)
@@ -101,7 +107,7 @@ def plan_session(persona, ticket, installed, goal="", usage=None,
         "posture": posture,
         "rebalanced": rebalanced,
         "below_floor": below_floor,
-        "argv": _argv(record, persona, pane, model, goal),
+        "argv": _argv(record, persona, pane, model, goal, vault),
     }
 
 
@@ -178,6 +184,21 @@ def _validate_vendors(document):
             value = record.get(flag)
             if value is not None and not isinstance(value, str):
                 raise VendorError(f"{ident} {flag} must be a string or null")
+        agent_file = record.get("agent_file")
+        if agent_file is not None and not isinstance(agent_file, bool):
+            raise VendorError(f"{ident} agent_file must be true or false")
+        if agent_file and not record.get("agent_flag"):
+            raise VendorError(f"{ident} agent_file needs an agent_flag")
+        for name in ("instructions_flag", "instructions_config"):
+            value = record.get(name)
+            if value is not None and (not isinstance(value, str) or not value):
+                raise VendorError(f"{ident} {name} must be a string or null")
+        if (record.get("instructions_flag") is None) != (
+            record.get("instructions_config") is None
+        ):
+            raise VendorError(
+                f"{ident} needs both instructions_flag and instructions_config, or neither"
+            )
         models = record.get("models")
         if not isinstance(models, dict):
             raise VendorError(f"{ident} needs models")
@@ -305,13 +326,72 @@ def _token(value, label):
     return value
 
 
-def _argv(record, persona, pane, model, goal):
+def _persona_file(vault, persona):
+    return os.path.join(os.path.realpath(vault), ".claude", "agents", persona + ".md")
+
+
+def _persona_body(vault, persona):
+    path = _persona_file(vault, persona)
+    try:
+        with open(path, encoding="utf-8") as handle:
+            body = handle.read()
+    except (OSError, UnicodeError) as exc:
+        raise VendorError(
+            f"persona file is not readable: .claude/agents/{persona}.md"
+        ) from exc
+    if not body.strip():
+        raise VendorError(f"persona file is empty: .claude/agents/{persona}.md")
+    return body
+
+
+def _toml_basic_string(text):
+    """Encode text as a TOML basic string, so a config value keeps every character."""
+    pieces = ['"']
+    for char in text:
+        if char == "\\":
+            pieces.append("\\\\")
+        elif char == '"':
+            pieces.append('\\"')
+        elif char == "\b":
+            pieces.append("\\b")
+        elif char == "\t":
+            pieces.append("\\t")
+        elif char == "\n":
+            pieces.append("\\n")
+        elif char == "\f":
+            pieces.append("\\f")
+        elif char == "\r":
+            pieces.append("\\r")
+        elif ord(char) < 32:
+            pieces.append("\\u%04x" % ord(char))
+        else:
+            pieces.append(char)
+    pieces.append('"')
+    return "".join(pieces)
+
+
+def _argv(record, persona, pane, model, goal, vault=None):
     argv = ["herdr", "pane", "run", pane, record["command"], record["model_flag"], model]
     if record.get("agent_flag"):
-        argv.extend([record["agent_flag"], persona])
+        if vault and record.get("agent_file"):
+            agent = _persona_file(vault, persona)
+        else:
+            agent = persona
+        argv.extend([record["agent_flag"], agent])
+    elif vault and record.get("instructions_flag"):
+        body = _persona_body(vault, persona)
+        argv.extend([
+            record["instructions_flag"],
+            record["instructions_config"] + "=" + _toml_basic_string(body),
+        ])
     if record.get("session_flag"):
         argv.extend([record["session_flag"], pane])
     if goal:
+        # A goal that begins with "-" is an option of this CLI unless "--"
+        # ends the options first. The instructions CLIs take the goal as a
+        # positional prompt.
+        if record.get("instructions_flag"):
+            argv.append("--")
         argv.append(goal)
     return argv
 
