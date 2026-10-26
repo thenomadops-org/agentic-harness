@@ -80,11 +80,16 @@ cd my-org && claude
 ## Lead assignment
 
 The owner names the lead explicitly; quota pressure never swaps the holder.
-Record an assignment with the owner's exact words in quotation marks. This
-updates both `state/lead.md` and `org/routing.yaml`:
+Record an assignment with the owner's exact words in quotation marks and link
+to the source decision. This updates both `state/lead.md` and `org/routing.yaml`.
+The command is non-interactive and can be run over SSH; identify the recorder
+with `--agent` or `HX_AGENT`. There is no expiry: renewal means re-running the
+lock with the current owner quote and source.
 
 ```bash
-bin/hx lock lead --holder grok --quote '"Bo holds the lead role per design v3"'
+bin/hx lock lead --holder grok --agent codex \
+  --source 'https://thenomadops.atlassian.net/browse/OPS-337?focusedCommentId=10954' \
+  --quote '"Bo holds the lead"'
 bin/hx lead brief
 bin/hx lead handoff --to grok --dry-run
 ```

@@ -8,6 +8,7 @@ from pathlib import Path
 import re
 import subprocess
 import sys
+import urllib.parse
 
 VENDORS = ("claude", "grok", "codex")
 ROOT = Path(__file__).resolve().parents[1]
@@ -36,22 +37,67 @@ def _quoted_owner_statement(value):
                for left, right in pairs)
 
 
+def _valid_source(value):
+    if not isinstance(value, str) or any(char.isspace() for char in value):
+        return False
+    parsed = urllib.parse.urlparse(value)
+    return parsed.scheme in ("https", "http") and bool(parsed.netloc)
+
+
 def _read_assignment(path):
     try:
         text = path.read_text(encoding="utf-8")
     except OSError as exc:
         raise LeadError(f"lead assignment unavailable: {exc.strerror}") from None
-    required = ("Holder:", "Recorded at:", "Owner statement:")
-    if any(label not in text for label in required):
+    lines = text.splitlines()
+    fields = {
+        key: next((line for line in lines if line.startswith(f"- {key}: ")), None)
+        for key in ("Holder", "Recorded at", "Named by", "Recorded by", "Owner statement", "Source")
+    }
+    holder = fields["Holder"]
+    timestamp = fields["Recorded at"]
+    recorded_by = fields["Recorded by"]
+    owner_statement = fields["Owner statement"]
+    source = fields["Source"]
+    valid_timestamp = False
+    if timestamp:
+        try:
+            datetime.datetime.fromisoformat(timestamp.removeprefix("- Recorded at: `").rstrip("`"))
+            valid_timestamp = True
+        except ValueError:
+            pass
+    valid_holder = holder in (
+        "- Holder: `claude`", "- Holder: `grok`", "- Holder: `codex`",
+    )
+    valid_recorder = recorded_by in tuple(
+        f"- Recorded by: `{vendor}`" for vendor in VENDORS
+    )
+    owner_quote = owner_statement.removeprefix("- Owner statement: ") if owner_statement else ""
+    source_url = source.removeprefix("- Source: ") if source else ""
+    if (
+        lines[:2] != ["# Lead assignment", ""]
+        or not valid_holder
+        or not valid_timestamp
+        or fields["Named by"] != "- Named by: Chris"
+        or not valid_recorder
+        or not _quoted_owner_statement(owner_quote)
+        or not _valid_source(source_url)
+    ):
         raise LeadError(f"invalid lead assignment file: {path}")
     return text
 
 
-def lock_lead(holder, quote, environ=None, now=None):
+def lock_lead(holder, quote, environ=None, now=None, agent=None, source=None):
+    environ = os.environ if environ is None else environ
     if holder not in VENDORS:
         raise LeadError("holder must be claude, grok, or codex")
     if not _quoted_owner_statement(quote):
         raise LeadError("refusing lead assignment without a quoted owner statement")
+    recorded_by = agent or environ.get("HX_AGENT")
+    if recorded_by not in VENDORS:
+        raise LeadError("recorder must be claude, grok, or codex via --agent or HX_AGENT")
+    if not _valid_source(source):
+        raise LeadError("a valid --source link is required")
     recorded = now or datetime.datetime.now(datetime.timezone.utc)
     if recorded.tzinfo is None:
         raise LeadError("assignment time must include a timezone")
@@ -62,7 +108,9 @@ def lock_lead(holder, quote, environ=None, now=None):
         f"- Holder: `{holder}`\n"
         f"- Recorded at: `{timestamp_text}`\n"
         "- Named by: Chris\n"
+        f"- Recorded by: `{recorded_by}`\n"
         f"- Owner statement: {quote}\n"
+        f"- Source: {source}\n"
     )
     config = routing_path(environ)
     try:
@@ -167,13 +215,17 @@ def lock_main(argv=None, environ=None):
     environ = os.environ if environ is None else environ
     parser = argparse.ArgumentParser(prog="hx lock lead")
     parser.add_argument("--holder", choices=VENDORS, required=True)
+    parser.add_argument("--agent", choices=VENDORS, default=environ.get("HX_AGENT"))
+    parser.add_argument("--source", required=True, help="link to the owner's statement")
     parser.add_argument(
         "--quote",
         help="owner's exact statement, enclosed in matching quotation marks",
     )
     args = parser.parse_args(argv)
     try:
-        path = lock_lead(args.holder, args.quote, environ=environ)
+        path = lock_lead(
+            args.holder, args.quote, environ=environ, agent=args.agent, source=args.source,
+        )
     except (LeadError, OSError) as exc:
         print(f"hx lock lead: {exc}", file=sys.stderr)
         return 1
