@@ -424,3 +424,68 @@ jobs:
             exit 1
           fi
           echo "refused, as it must"
+
+  metric-gate:
+    name: metric-gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Python and Go versions
+        run: |
+          python3 -c 'import sys; assert sys.version_info >= (3, 11), sys.version; print(sys.version)'
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: tools/sdlc-metrics/go.mod
+          cache: false
+      - name: measure coverage-only metrics
+        run: python3 tools/metric_gate.py measure --out "${RUNNER_TEMP}/coverage.json"
+      - name: measure PR base main for first history bootstrap
+        if: github.event_name == 'pull_request'
+        run: |
+          set -euo pipefail
+          BASE_SHA=$(python3 -c 'import json, os; print(json.load(open(os.environ["GITHUB_EVENT_PATH"]))["pull_request"]["base"]["sha"])')
+          echo "Measuring main commit: ${BASE_SHA}"
+          git fetch --no-tags --depth=1 origin "$BASE_SHA"
+          if git cat-file -e "${BASE_SHA}:metrics/coverage-history.json" 2>/dev/null; then
+            echo "Main already has committed metric history; that file is the PR baseline."
+            exit 0
+          fi
+          MAIN_ROOT="${RUNNER_TEMP}/metric-gate-main"
+          git worktree add --detach "$MAIN_ROOT" "$BASE_SHA"
+          # Reproduce the one-time bootstrap report from run 40385907502.
+          # That run used this harness revision and measured main at BASE_SHA.
+          BOOTSTRAP_HARNESS=6430894b8f4d01dff56c39f762c72b9d40b14fc3
+          git fetch --no-tags --depth=1 origin "$BOOTSTRAP_HARNESS"
+          git show "${BOOTSTRAP_HARNESS}:tools/metric_gate.py" > "$MAIN_ROOT/tools/metric_gate.py"
+          git show "${BOOTSTRAP_HARNESS}:tools/test_metric_gate.py" > "$MAIN_ROOT/tools/test_metric_gate.py"
+          python3 "$MAIN_ROOT/tools/metric_gate.py" measure --repo "$MAIN_ROOT" \
+            --out "${RUNNER_TEMP}/main-coverage.json"
+          echo "Main baseline source: ${BASE_SHA}"
+          cat "${RUNNER_TEMP}/main-coverage.json"
+      - name: compare PR against main committed history
+        if: github.event_name == 'pull_request'
+        run: |
+          set -euo pipefail
+          BASE_SHA=$(python3 -c 'import json, os; print(json.load(open(os.environ["GITHUB_EVENT_PATH"]))["pull_request"]["base"]["sha"])')
+          git fetch --no-tags --depth=1 origin "$BASE_SHA"
+          if git cat-file -e "${BASE_SHA}:metrics/coverage-history.json" 2>/dev/null; then
+            git show "${BASE_SHA}:metrics/coverage-history.json" > "${RUNNER_TEMP}/main-history.json"
+            python3 tools/metric_gate.py check \
+              --history metrics/coverage-history.json \
+              --base-history "${RUNNER_TEMP}/main-history.json" \
+              --current "${RUNNER_TEMP}/coverage.json" \
+              --event "${GITHUB_EVENT_PATH}"
+          else
+            python3 tools/metric_gate.py check \
+              --history metrics/coverage-history.json \
+              --bootstrap-current "${RUNNER_TEMP}/main-coverage.json" \
+              --current "${RUNNER_TEMP}/coverage.json" \
+              --event "${GITHUB_EVENT_PATH}"
+          fi
+      - name: verify merged main measurement against committed history
+        if: github.ref == 'refs/heads/main'
+        run: >-
+          python3 tools/metric_gate.py check
+          --history metrics/coverage-history.json
+          --current "${RUNNER_TEMP}/coverage.json"
+          --event "${GITHUB_EVENT_PATH}"
