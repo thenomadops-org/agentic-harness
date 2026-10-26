@@ -424,3 +424,23 @@ jobs:
             exit 1
           fi
           echo "refused, as it must"
+
+  metric-gate:
+    name: metric-gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Python and Go versions
+        run: |
+          python3 -c 'import sys; assert sys.version_info >= (3, 11), sys.version; print(sys.version)'
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: tools/sdlc-metrics/go.mod
+      - name: measure coverage-only metrics
+        run: python3 tools/metric_gate.py measure --out "${RUNNER_TEMP}/coverage.json"
+      - name: compare against committed merge history
+        run: >-
+          python3 tools/metric_gate.py check
+          --history metrics/coverage-history.json
+          --current "${RUNNER_TEMP}/coverage.json"
+          --event "${GITHUB_EVENT_PATH}"
