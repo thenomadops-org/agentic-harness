@@ -77,6 +77,16 @@ cd my-org && claude
 > /setup-my-org
 ```
 
+## Where tasks run
+
+Setup asks whether all tasks run on your own machines (`local`) or in the
+cloud (`cloud`). The default is your own machines. Pressing Enter picks
+`local`. So does a run whose input or output is not a terminal, including
+`tools/setup.py` from a script or with its output captured. Pass
+`--execution local` or `--execution cloud` to answer up front. The choice is
+saved as `execution` in the vault's `.claude/org.config.json`, and `org update`
+keeps it. The maintainer's preference is always their own machines.
+
 ## Lead assignment
 
 The owner names the lead explicitly; quota pressure never swaps the holder.
