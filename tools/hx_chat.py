@@ -153,22 +153,29 @@ def _nudge(target, sender, environ):
     herdr = Path.home() / ".local/bin/herdr"
     if not herdr.is_file() or not os.access(herdr, os.X_OK):
         return
-    prompt = f"New message in #agent-command-center from {sender}, run hx chat read --since 10m"
+    prompt = f"New team message from {sender}; run hx chat read --since 10m"
     try:
         listed = subprocess.run(
             [str(herdr), "agent", "list"], capture_output=True, text=True, timeout=5, check=True
         )
         data = json.loads(listed.stdout)
         rows = data.get("result", {}).get("agents", data.get("agents", []))
-        if not any((row.get("agent") or row.get("name")) == target for row in rows):
-            return
-        subprocess.run(
-            [str(herdr), "agent", "prompt", target, prompt],
-            capture_output=True,
-            text=True,
-            timeout=8,
-            check=True,
-        )
+        pane_ids = []
+        for row in rows:
+            vendor = row.get("vendor") or row.get("vendor_id") or row.get("agent")
+            if vendor != target:
+                continue
+            pane_id = row.get("pane_id")
+            if isinstance(pane_id, str) and pane_id and pane_id not in pane_ids:
+                pane_ids.append(pane_id)
+        for pane_id in pane_ids:
+            subprocess.run(
+                [str(herdr), "agent", "prompt", pane_id, prompt],
+                capture_output=True,
+                text=True,
+                timeout=8,
+                check=True,
+            )
     except Exception as exc:  # Nudge is best effort; Slack has already accepted the post.
         print(f"warning: herdr nudge failed ({type(exc).__name__})", file=sys.stderr)
 

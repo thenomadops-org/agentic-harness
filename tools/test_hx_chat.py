@@ -167,6 +167,41 @@ class HxChatTests(unittest.TestCase):
         with self.assertRaisesRegex(hx_chat.ChatError, "empty message"):
             hx_chat.run(args, environ=env)
 
+    def test_post_rejects_invalid_ticket_before_calling_slack(self):
+        args = hx_chat.build_parser().parse_args([
+            "post", "--agent", "codex", "--model", "m", "--ticket", "not-a-ticket", "hello",
+        ])
+        env = {"SLACK_BOT_TOKEN_CODEX": "token", "HX_CHAT_CHANNEL": "test-channel"}
+        with self.assertRaisesRegex(hx_chat.ChatError, "--ticket must look like OPS-340"):
+            hx_chat.run(args, environ=env, call=lambda *_: self.fail("Slack must not be called"))
+
+    def test_nudge_resolves_all_vendor_panes_and_named_lead_by_pane_id(self):
+        listing = subprocess.CompletedProcess([], 0, stdout=json.dumps({"result": {"agents": [
+            {"agent": "codex", "name": "engineer-OPS-340", "pane_id": "pane-codex-a"},
+            {"agent": "codex", "name": "qa-OPS-341", "pane_id": "pane-codex-b"},
+            {"vendor": "claude", "name": "lead-OPS-340", "pane_id": "pane-claude-lead"},
+        ]}}), stderr="")
+        env = {"HX_CHAT_NUDGE": "1"}
+        for target, expected in (
+            ("codex", ["pane-codex-a", "pane-codex-b"]),
+            ("claude", ["pane-claude-lead"]),
+        ):
+            with self.subTest(target=target):
+                calls = []
+
+                def run(argv, **_kwargs):
+                    calls.append(argv)
+                    return listing if argv[-2:] == ["agent", "list"] else subprocess.CompletedProcess(argv, 0)
+
+                with patch.object(pathlib.Path, "home", return_value=pathlib.Path("/tmp/fake-home")), \
+                     patch.object(pathlib.Path, "is_file", return_value=True), \
+                     patch("os.access", return_value=True), \
+                     patch("subprocess.run", side_effect=run):
+                    hx_chat._nudge(target, "grok", env)
+                prompt_calls = [call for call in calls if call[1:3] == ["agent", "prompt"]]
+                self.assertEqual([call[3] for call in prompt_calls], expected)
+                self.assertTrue(all("#agent-command-center" not in call[4] for call in prompt_calls))
+
     def test_post_prints_success_without_exposing_token_and_uses_configured_channel(self):
         args = hx_chat.build_parser().parse_args([
             "post", "--agent", "codex", "--model", "gpt-6-luna",
@@ -224,7 +259,9 @@ class HxChatTests(unittest.TestCase):
                 return {"ok": True, "ts": "123.45"}
             return {"ok": True, "permalink": "https://slack.example/p/12345"}
 
-        proc = subprocess.CompletedProcess([], 0, stdout=json.dumps({"agents": [{"agent": "grok"}]}), stderr="")
+        proc = subprocess.CompletedProcess([], 0, stdout=json.dumps({"agents": [
+            {"agent": "grok", "pane_id": "pane-grok-1"},
+        ]}), stderr="")
         with patch.object(pathlib.Path, "home", return_value=pathlib.Path("/tmp/fake-home")), \
              patch.object(pathlib.Path, "is_file", return_value=True), \
              patch("os.access", return_value=True), \
