@@ -398,6 +398,41 @@ class VendorTests(unittest.TestCase):
                 self.assertEqual(handle.read(), "other\n")
             self.assertFalse(os.path.islink(other))
 
+    def test_two_legacy_memories_with_the_same_name_keep_both(self):
+        with tempfile.TemporaryDirectory() as vault:
+            codex = os.path.join(vault, ".codex", "memory")
+            grok = os.path.join(vault, ".grok", "memory")
+            os.makedirs(codex)
+            os.makedirs(grok)
+            with open(os.path.join(codex, "same.md"), "w", encoding="utf-8") as handle:
+                handle.write("codex\n")
+            with open(os.path.join(grok, "same.md"), "w", encoding="utf-8") as handle:
+                handle.write("grok\n")
+            with open(os.path.join(codex, "only-codex.md"), "w", encoding="utf-8") as handle:
+                handle.write("only-codex\n")
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output):
+                vendors.bind_shared_memory(vault)
+            store = os.path.join(vault, ".claude", "memory")
+            bodies = _memory_bodies(store)
+            self.assertIn("codex\n", bodies)
+            self.assertIn("grok\n", bodies)
+            self.assertIn("only-codex\n", bodies)
+            self.assertIn("kept both copies of same.md", output.getvalue())
+            self.assertIn("same-grok.md", output.getvalue())
+            with open(os.path.join(store, "same.md"), encoding="utf-8") as handle:
+                self.assertEqual(handle.read(), "codex\n")
+            with open(os.path.join(store, "same-grok.md"), encoding="utf-8") as handle:
+                self.assertEqual(handle.read(), "grok\n")
+            self.assertTrue(os.path.islink(codex))
+            self.assertTrue(os.path.islink(grok))
+            for link in (codex, grok):
+                with open(os.path.join(link, "same.md"), encoding="utf-8") as handle:
+                    self.assertEqual(handle.read(), "codex\n")
+                with open(os.path.join(link, "same-grok.md"), encoding="utf-8") as handle:
+                    self.assertEqual(handle.read(), "grok\n")
+            self.assertEqual(_real_memory_dirs(vault), 1)
+
     def test_setup_and_update_bind_the_shared_store(self):
         with tempfile.TemporaryDirectory() as vault:
             output = io.StringIO()
@@ -425,6 +460,15 @@ class VendorTests(unittest.TestCase):
                 os.path.realpath(link),
                 os.path.realpath(os.path.join(vault, ".claude", "memory")),
             )
+
+
+def _memory_bodies(root):
+    bodies = []
+    for dirpath, _dirnames, filenames in os.walk(root):
+        for name in filenames:
+            with open(os.path.join(dirpath, name), encoding="utf-8") as handle:
+                bodies.append(handle.read())
+    return bodies
 
 
 def _real_memory_dirs(vault):

@@ -117,9 +117,11 @@ def launch_persona(persona, ticket, installed, goal="", runner=None, **kwargs):
 def bind_shared_memory(vault, vendors_path=None, routing_path=None):
     """Point every vendor memory path at one directory. Never copy.
 
-    An existing real directory is moved into the store when every file is new
-    or byte-identical. Different bytes for the same relative path are refused
-    and left where they are.
+    An existing real directory is moved into the store. Byte-identical files
+    collapse to one. When two legacy directories hold different bytes at the
+    same relative path, both are kept: the later copy is renamed, and the
+    rename is printed. A file already in the store with different bytes is
+    refused and left where it is.
     """
     catalog = load_vendors(vendors_path)
     routing = load_routing(routing_path)
@@ -128,17 +130,21 @@ def bind_shared_memory(vault, vendors_path=None, routing_path=None):
     store = _vault_path(vault, store_rel)
     os.makedirs(store, exist_ok=True)
 
+    claimed = {}
+    reports = []
     actions = []
     for record in catalog["vendors"]:
         link_rel = record["memory_link"]
         if os.path.normpath(link_rel) == os.path.normpath(store_rel):
             continue
         link = _vault_path(vault, link_rel)
-        action = _plan_link(link, store)
+        action = _plan_link(link, store, claimed, record["id"], reports)
         if action is not None:
             actions.append(action)
     for action in actions:
         _apply_link(action, store)
+    for line in reports:
+        print(line)
     return store
 
 
@@ -310,8 +316,13 @@ def _vault_path(vault, relative):
     return os.path.join(vault, os.path.normpath(relative))
 
 
-def _plan_link(link, store):
-    """Return a pending link, or None when the path already shares the store."""
+def _plan_link(link, store, claimed, vendor_id, reports):
+    """Return a pending link, or None when the path already shares the store.
+
+    claimed maps a store-relative path to the source file that will occupy it.
+    Planning sees every legacy directory before any move, so two sources that
+    share a name cannot overwrite each other.
+    """
     if os.path.islink(link):
         if os.path.realpath(link) != os.path.realpath(store):
             raise VendorError(f"{os.path.basename(link)} already points somewhere else")
@@ -325,6 +336,18 @@ def _plan_link(link, store):
         for name in filenames:
             src = os.path.join(dirpath, name)
             rel = os.path.relpath(src, link)
+            if rel in claimed:
+                if _same_bytes(src, claimed[rel]):
+                    deletes.append(src)
+                    continue
+                renamed = _renamed_relative(rel, vendor_id, claimed, store)
+                reports.append(
+                    f"memory: kept both copies of {rel}; "
+                    f"renamed the {vendor_id} copy to {renamed}"
+                )
+                claimed[renamed] = src
+                moves.append((src, os.path.join(store, renamed)))
+                continue
             dst = os.path.join(store, rel)
             if os.path.lexists(dst):
                 if os.path.isfile(src) and os.path.isfile(dst) and _same_bytes(src, dst):
@@ -333,8 +356,24 @@ def _plan_link(link, store):
                 raise VendorError(
                     f"shared memory already has {rel} and {link} has different contents"
                 )
+            claimed[rel] = src
             moves.append((src, dst))
     return {"link": link, "moves": moves, "deletes": deletes, "replace_dir": True}
+
+
+def _renamed_relative(rel, vendor_id, claimed, store):
+    """Pick a free store-relative path for a second copy of rel."""
+    directory, name = os.path.split(rel)
+    stem, ext = os.path.splitext(name)
+    number = 0
+    while number < 1000:
+        label = vendor_id if number == 0 else f"{vendor_id}-{number + 1}"
+        filename = f"{stem}-{label}{ext}"
+        candidate = os.path.join(directory, filename) if directory else filename
+        if candidate not in claimed and not os.path.lexists(os.path.join(store, candidate)):
+            return candidate
+        number += 1
+    raise VendorError(f"no free name for {rel}")
 
 
 def _apply_link(action, store):
