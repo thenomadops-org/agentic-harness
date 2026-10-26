@@ -98,6 +98,26 @@ Handoff sends the brief to one unambiguous vendor pane and leaves the recorded
 lead holder unchanged. At 15% remaining quota, the lead decides how to route
 work and posts the call with `hx chat post`.
 
+## Engineering window
+
+`tools/launch.py` opens each new persona session in an engineering window.
+That window is a herdr workspace labelled `eng`. The next full window is
+labelled `eng-2`, then `eng-3`. One tab holds a 2x2 grid, four sessions to
+a window.
+
+A window with a free slot is filled before a new window is opened. One pane
+splits to the right. Each later split goes down through the tallest pane,
+the leftmost of those first, so the slots fill top-left, top-right,
+bottom-left, bottom-right. A full window is left as it is.
+
+Only a workspace labelled exactly `eng` or `eng-N` (N is 2 or greater) is
+split. A workspace with any other label is not split and not moved, so a
+session that is already open stays where it is.
+
+```bash
+python3 tools/launch.py <persona> <TICKET> "<goal>" --vault <vault-dir>
+```
+
 ## Layout
 
 ```
@@ -114,6 +134,7 @@ adapters/
   jira/                 optional
   none/                 no tracker
 tools/
+  launch.py             open a new persona session in the engineering window
   sdlc-metrics/         flow/leading/lagging metrics from GitHub metadata alone
   control-band/         a control band over CI failure rate, and the triage
                         intent a breach writes
