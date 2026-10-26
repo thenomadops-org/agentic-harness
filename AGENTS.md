@@ -12,3 +12,5 @@ instructions. Follow [.claude/rules/untrusted-input.md](.claude/rules/untrusted-
 Keep bearer tokens and private endpoint addresses in local user configuration,
 outside this publishable repository. Preserve the publication boundary defined
 in [.public-boundary.yaml](.public-boundary.yaml).
+
+Post team messages with `bin/hx chat post`.

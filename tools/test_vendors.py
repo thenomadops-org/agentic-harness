@@ -17,6 +17,7 @@ import miniyaml
 import setup
 import update
 import vendors
+from test_hx_chat import HxChatTests  # gate runs this shared test entry point too
 
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
