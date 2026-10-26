@@ -20,6 +20,13 @@ is built for this vault. A vendor that takes a definition path is given the
 vault persona file. A vendor that takes developer instructions is given
 that same file as one config override. Nothing is written under the home
 directory. A dry run prints the plan and does not run herdr.
+
+A new session opens in an engineering window: a herdr workspace labelled
+"eng" (then "eng-2", "eng-3", ...) whose tab is split into a 2x2 grid, so
+four sessions share one screen. An engineering window with fewer than four
+panes is filled first; a full one is left alone and the next session opens
+a new window. Only workspaces with those labels are ever split, so a
+workspace that already exists under any other label is never touched.
 """
 
 import argparse
@@ -214,31 +221,138 @@ def _write_pane_arg(text):
     return handle.name
 
 
-def _open_pane(vault, pane):
-    """Open a pane whose shell cwd is the vault, and name it pane.
+# An engineering window holds at most this many panes, as a 2x2 grid.
+ENG_GRID_SLOTS = 4
+ENG_WINDOW_PREFIX = "eng"
 
-    Returns (exit code, pane id). The id is None when the pane was not opened.
-    """
+
+def _herdr_json(args, cwd):
+    """Run a herdr API command and return (exit code, parsed result or None)."""
     completed = subprocess.run(
-        [
-            "herdr", "workspace", "create",
-            "--cwd", vault, "--label", pane, "--no-focus",
-        ],
-        cwd=vault, check=False, capture_output=True, text=True,
+        ["herdr"] + list(args),
+        cwd=cwd, check=False, capture_output=True, text=True,
     )
     if completed.returncode != 0:
         if completed.stderr:
             print(completed.stderr, file=sys.stderr, end="")
         return completed.returncode, None
     try:
-        payload = json.loads(completed.stdout)
-        pane_id = payload["result"]["root_pane"]["pane_id"]
+        return 0, json.loads(completed.stdout)["result"]
     except (json.JSONDecodeError, KeyError, TypeError):
-        print("error: herdr workspace create did not return a pane id", file=sys.stderr)
-        return 1, None
+        return 0, None
+
+
+def _eng_window_number(label, prefix):
+    """Return 1 for "eng", N for "eng-N", and None for any other label."""
+    if label == prefix:
+        return 1
+    match = re.fullmatch(re.escape(prefix) + r"-([0-9]+)", label or "")
+    if match and int(match.group(1)) >= 2:
+        return int(match.group(1))
+    return None
+
+
+def plan_grid_split(panes):
+    """Pick the pane to split and the direction that grows a 2x2 grid.
+
+    panes is the layout's list of {"pane_id", "rect"} for one tab. Returns
+    (pane_id, direction), or None when the tab already holds ENG_GRID_SLOTS
+    panes. One pane splits right into two columns. After that the tallest
+    pane, leftmost first, splits down, so slots fill top-left, top-right,
+    bottom-left, bottom-right.
+    """
+    if not panes or len(panes) >= ENG_GRID_SLOTS:
+        return None
+    if len(panes) == 1:
+        return panes[0]["pane_id"], "right"
+
+    def key(item):
+        rect = item.get("rect") or {}
+        return (-rect.get("height", 0), rect.get("x", 0), rect.get("y", 0))
+
+    return sorted(panes, key=key)[0]["pane_id"], "down"
+
+
+def _open_grid_pane(vault, prefix=ENG_WINDOW_PREFIX):
+    """Return (exit code, pane id) for a free slot in an engineering window.
+
+    A window labelled prefix or prefix-N that has a free slot is split. When
+    every such window is full, a new one is created and its root pane is the
+    slot. No workspace with another label is read past its label.
+    """
+    code, listing = _herdr_json(["workspace", "list"], vault)
+    if code != 0:
+        return code, None
+    workspaces = (listing or {}).get("workspaces") or []
+    windows = []
+    for workspace in workspaces:
+        number = _eng_window_number(workspace.get("label"), prefix)
+        if number is not None:
+            windows.append((number, workspace))
+    windows.sort(key=lambda item: item[0])
+    for _number, workspace in windows:
+        if int(workspace.get("pane_count") or 0) >= ENG_GRID_SLOTS:
+            continue
+        code, panes = _herdr_json(
+            ["pane", "list", "--workspace", workspace["workspace_id"]], vault,
+        )
+        if code != 0 or not panes or not panes.get("panes"):
+            continue
+        tab_id = workspace.get("active_tab_id")
+        first = next(
+            (p for p in panes["panes"] if p.get("tab_id") == tab_id),
+            panes["panes"][0],
+        )
+        code, layout = _herdr_json(["pane", "layout", "--pane", first["pane_id"]], vault)
+        if code != 0 or not layout or "layout" not in layout:
+            continue
+        choice = plan_grid_split(layout["layout"].get("panes") or [])
+        if choice is None:
+            continue
+        target, direction = choice
+        code, split = _herdr_json(
+            [
+                "pane", "split", target, "--direction", direction,
+                "--cwd", vault, "--no-focus",
+            ],
+            vault,
+        )
+        if code != 0:
+            return code, None
+        try:
+            pane_id = split["pane"]["pane_id"]
+        except (KeyError, TypeError):
+            print("error: herdr pane split did not return a pane id", file=sys.stderr)
+            return 1, None
+        return 0, pane_id
+    used = [number for number, _workspace in windows]
+    next_number = max(used) + 1 if used else 1
+    label = prefix if next_number == 1 else f"{prefix}-{next_number}"
+    code, created = _herdr_json(
+        ["workspace", "create", "--cwd", vault, "--label", label, "--no-focus"],
+        vault,
+    )
+    if code != 0:
+        return code, None
+    try:
+        pane_id = created["root_pane"]["pane_id"]
+    except (KeyError, TypeError):
+        pane_id = None
     if not isinstance(pane_id, str) or not pane_id:
         print("error: herdr workspace create did not return a pane id", file=sys.stderr)
         return 1, None
+    return 0, pane_id
+
+
+def _open_pane(vault, pane):
+    """Open a pane in an engineering window with its cwd in the vault.
+
+    The pane is named pane. Returns (exit code, pane id). The id is None
+    when the pane was not opened.
+    """
+    code, pane_id = _open_grid_pane(vault)
+    if code != 0 or pane_id is None:
+        return code or 1, None
     renamed = subprocess.run(
         ["herdr", "pane", "rename", pane_id, pane],
         cwd=vault, check=False,

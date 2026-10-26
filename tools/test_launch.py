@@ -11,6 +11,7 @@ import json
 import os
 import re
 import shlex
+import shutil
 import stat
 import tempfile
 import tomllib
@@ -382,11 +383,87 @@ class LaunchTests(unittest.TestCase):
         self.assertIn("--cwd", opened[0]["argv"])
 
 
-def _launch(home, vault, args, vendor_commands, through_shell=False):
+class EngineeringGridTests(unittest.TestCase):
+    """New sessions fill a 2x2 engineering window, then open the next one."""
+
+    def test_plan_grid_split_fills_a_two_by_two_grid(self):
+        one = [{"pane_id": "a", "rect": {"x": 0, "y": 0, "width": 200, "height": 60}}]
+        self.assertEqual(launch.plan_grid_split(one), ("a", "right"))
+        two = [
+            {"pane_id": "a", "rect": {"x": 0, "y": 0, "width": 100, "height": 60}},
+            {"pane_id": "b", "rect": {"x": 100, "y": 0, "width": 100, "height": 60}},
+        ]
+        self.assertEqual(launch.plan_grid_split(two), ("a", "down"))
+        three = [
+            {"pane_id": "a", "rect": {"x": 0, "y": 0, "width": 100, "height": 30}},
+            {"pane_id": "c", "rect": {"x": 0, "y": 30, "width": 100, "height": 30}},
+            {"pane_id": "b", "rect": {"x": 100, "y": 0, "width": 100, "height": 60}},
+        ]
+        self.assertEqual(launch.plan_grid_split(three), ("b", "down"))
+        four = three + [{"pane_id": "d", "rect": {"x": 100, "y": 30, "width": 100, "height": 30}}]
+        self.assertIsNone(launch.plan_grid_split(four))
+
+    def test_eng_window_labels(self):
+        self.assertEqual(launch._eng_window_number("eng", "eng"), 1)
+        self.assertEqual(launch._eng_window_number("eng-3", "eng"), 3)
+        for label in ("theside", "eng-1", "eng-x", "bo-eng", "engineering", None):
+            self.assertIsNone(launch._eng_window_number(label, "eng"))
+
+    def test_five_launches_fill_one_grid_then_open_eng_2(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            vault = os.path.join(tmp, "vault")
+            home = os.path.join(tmp, "home")
+            os.makedirs(vault)
+            os.makedirs(home)
+            state = os.path.join(tmp, "herdr-state.json")
+            # A workspace that already exists under another label must be
+            # left exactly as it is.
+            existing = {
+                "workspaces": [{
+                    "workspace_id": "w4", "label": "theside", "tab_id": "w4:t1",
+                    "panes": [{"pane_id": "w4:p1", "rect": {
+                        "x": 0, "y": 0, "width": 200, "height": 60}}],
+                }],
+                "next": 1,
+            }
+            with open(state, "w", encoding="utf-8") as handle:
+                json.dump(existing, handle)
+            for index in range(5):
+                code, _output, _rows = _launch(
+                    home, vault,
+                    [f"engineer-{index + 1}", "OPS-370", "build it", "--vault", vault],
+                    ["grok"],
+                    grid_state=state,
+                )
+                self.assertEqual(code, 0)
+                shutil.rmtree(os.path.join(home, "bin"))
+            with open(state, encoding="utf-8") as handle:
+                final = json.load(handle)
+            by_label = {w["label"]: w for w in final["workspaces"]}
+            self.assertEqual(sorted(by_label), ["eng", "eng-2", "theside"])
+            self.assertEqual(by_label["theside"], existing["workspaces"][0])
+            eng = by_label["eng"]["panes"]
+            self.assertEqual(len(eng), 4)
+            corners = sorted((p["rect"]["x"], p["rect"]["y"]) for p in eng)
+            self.assertEqual(corners, [(0, 0), (0, 30), (100, 0), (100, 30)])
+            for pane in eng:
+                self.assertEqual(pane["rect"]["width"], 100)
+                self.assertEqual(pane["rect"]["height"], 30)
+                self.assertEqual(pane["cwd"], os.path.realpath(vault))
+            self.assertEqual(len(by_label["eng-2"]["panes"]), 1)
+            names = sorted(p.get("name") for p in eng)
+            self.assertEqual(len(set(names)), 4)
+
+
+def _launch(home, vault, args, vendor_commands, through_shell=False, grid_state=None):
     bindir = os.path.join(home, "bin")
-    record = _fake_path(bindir, vendor_commands, through_shell=through_shell)
+    record = _fake_path(
+        bindir, vendor_commands, through_shell=through_shell, grid_state=grid_state,
+    )
     saved = os.environ.copy()
     os.environ["HOME"] = home
+    if grid_state:
+        os.environ["HERDR_STATE"] = grid_state
     os.environ["PATH"] = bindir
     os.environ["HERDR_RECORD"] = record
     os.environ["VENDOR_RECORD"] = os.path.join(bindir, "vendor.jsonl")
@@ -460,11 +537,75 @@ def _vendor_args(home):
     return rows[0]["argv"][1:]
 
 
-def _fake_path(bindir, vendor_commands, through_shell=False):
+_GRID_HERDR = r"""#!/usr/bin/python3
+import json, os, sys
+with open(os.environ['HERDR_RECORD'], 'a', encoding='utf-8') as handle:
+    handle.write(json.dumps({'argv': sys.argv, 'cwd': os.getcwd()}) + '\n')
+path = os.environ['HERDR_STATE']
+with open(path, encoding='utf-8') as handle:
+    state = json.load(handle)
+args = sys.argv[1:]
+def opt(name):
+    return args[args.index(name) + 1]
+def save():
+    with open(path, 'w', encoding='utf-8') as handle:
+        json.dump(state, handle)
+def find(pane_id):
+    for w in state['workspaces']:
+        for p in w['panes']:
+            if p['pane_id'] == pane_id:
+                return w, p
+    raise SystemExit(1)
+def out(result):
+    json.dump({'result': result}, sys.stdout)
+if args[:2] == ['workspace', 'list']:
+    out({'workspaces': [{'workspace_id': w['workspace_id'], 'label': w['label'],
+        'active_tab_id': w['tab_id'], 'pane_count': len(w['panes'])}
+        for w in state['workspaces']]})
+elif args[:2] == ['workspace', 'create']:
+    n = state['next']; state['next'] += 1
+    wid = 'wt%d' % n
+    pane = {'pane_id': wid + ':p1', 'cwd': opt('--cwd'),
+            'rect': {'x': 0, 'y': 0, 'width': 200, 'height': 60}}
+    state['workspaces'].append({'workspace_id': wid, 'label': opt('--label'),
+        'tab_id': wid + ':t1', 'panes': [pane]})
+    save()
+    out({'root_pane': {'pane_id': pane['pane_id']}, 'tab': {'tab_id': wid + ':t1'}})
+elif args[:2] == ['pane', 'list']:
+    w = [w for w in state['workspaces'] if w['workspace_id'] == opt('--workspace')][0]
+    out({'panes': [{'pane_id': p['pane_id'], 'tab_id': w['tab_id']} for p in w['panes']]})
+elif args[:2] == ['pane', 'layout']:
+    w, _p = find(opt('--pane'))
+    out({'layout': {'panes': [{'pane_id': p['pane_id'], 'rect': p['rect']} for p in w['panes']]}})
+elif args[:2] == ['pane', 'split']:
+    w, p = find(args[2])
+    r = dict(p['rect'])
+    if opt('--direction') == 'right':
+        half = r['width'] // 2
+        p['rect'] = dict(r, width=half)
+        rect = dict(r, x=r['x'] + half, width=r['width'] - half)
+    else:
+        half = r['height'] // 2
+        p['rect'] = dict(r, height=half)
+        rect = dict(r, y=r['y'] + half, height=r['height'] - half)
+    new = {'pane_id': '%s:p%d' % (w['workspace_id'], len(w['panes']) + 1),
+           'cwd': opt('--cwd'), 'rect': rect}
+    w['panes'].append(new)
+    save()
+    out({'pane': {'pane_id': new['pane_id']}})
+elif args[:2] == ['pane', 'rename']:
+    _w, p = find(args[2]); p['name'] = args[3]; save()
+"""
+
+
+def _fake_path(bindir, vendor_commands, through_shell=False, grid_state=None):
     os.makedirs(bindir)
     record = os.path.join(bindir, "record.jsonl")
     herdr = os.path.join(bindir, "herdr")
-    if through_shell:
+    if grid_state:
+        herdr_body = _GRID_HERDR
+        vendor_body = "#!/bin/sh\nexit 0\n"
+    elif through_shell:
         # pane run joins the command tail and hands that line to a shell,
         # the same way the real runner sends the line to the pane shell.
         herdr_body = (
