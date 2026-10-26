@@ -10,21 +10,25 @@ when more than one is installed. This prints the plan, opens a pane whose
 shell starts in the vault, and runs that herdr command. herdr addresses a
 pane by id, so the pane slot of the planned argv is the id just created.
 herdr joins the command tail and sends that line through a shell, so each
-element of the tail is shell-quoted first. The pane id is not quoted: herdr
-reads it itself. The plan is built for this vault. A vendor that takes a
-definition path is given the vault persona file. A vendor that takes
-developer instructions is given that same file as one config override.
-Nothing is written under the home directory. A dry run prints the plan and
-does not run herdr.
+element of the tail is shell-quoted first. A canonical terminal line holds
+4095 bytes and discards the rest, so a longer element is stored in a
+temporary file and the shell reads it back. The vendor still receives the
+full argument. The pane id is not quoted: herdr reads it itself. The plan
+is built for this vault. A vendor that takes a definition path is given the
+vault persona file. A vendor that takes developer instructions is given
+that same file as one config override. Nothing is written under the home
+directory. A dry run prints the plan and does not run herdr.
 """
 
 import argparse
 import json
 import os
+import re
 import shlex
 import shutil
 import subprocess
 import sys
+import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -124,11 +128,62 @@ def main(argv=None):
         return 1
     argv[3] = pane_id
     # The pane shell word-splits this tail. Quote every element so a goal
-    # that contains spaces or quotes stays one argument.
-    argv[4:] = [shlex.quote(part) for part in argv[4:]]
+    # that contains spaces or quotes stays one argument. A line past the
+    # terminal's 4095-byte limit is cut and the vendor never sees the rest.
+    try:
+        argv[4:] = _pane_shell_tail(argv[4:])
+    except vendors.VendorError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
     print(f"pane_id: {pane_id}")
     completed = subprocess.run(argv, cwd=vault, check=False)
     return completed.returncode
+
+
+# One canonical-mode line is 4095 bytes plus the newline that executes it.
+_PANE_SHELL_LIMIT = 4095
+_SAFE_TEMP_PATH = re.compile(r"\A/[A-Za-z0-9_./-]+\Z")
+
+
+def _pane_shell_tail(parts):
+    """Quote a pane command so the typed line fits in a terminal buffer.
+
+    The shell expands a staged word before it starts the vendor, so the
+    vendor receives the original argument.
+    """
+    quoted = [shlex.quote(part) for part in parts]
+    originals = list(parts)
+    while _joined_bytes(quoted) > _PANE_SHELL_LIMIT:
+        index = max(range(len(quoted)), key=lambda i: len(quoted[i].encode()))
+        staged = _stage_shell_word(originals[index])
+        if len(staged.encode()) >= len(quoted[index].encode()):
+            break
+        quoted[index] = staged
+    return quoted
+
+
+def _joined_bytes(quoted):
+    if not quoted:
+        return 0
+    return sum(len(part.encode()) for part in quoted) + len(quoted) - 1
+
+
+def _stage_shell_word(text):
+    """Return a short shell word that expands to text."""
+    handle = tempfile.NamedTemporaryFile(
+        prefix="pane-arg-", delete=False,
+    )
+    try:
+        handle.write(text.encode("utf-8"))
+    finally:
+        handle.close()
+    os.chmod(handle.name, 0o600)
+    if _SAFE_TEMP_PATH.fullmatch(handle.name) is None:
+        os.unlink(handle.name)
+        raise vendors.VendorError("temporary argument path cannot be passed to the shell")
+    # Absolute path: the pane PATH may not include cat, and the substitution
+    # has to expand before the vendor starts.
+    return '"$(/bin/cat ' + handle.name + ')"'
 
 
 def _open_pane(vault, pane):

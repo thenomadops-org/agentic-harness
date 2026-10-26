@@ -387,6 +387,11 @@ def _argv(record, persona, pane, model, goal, vault=None):
     if record.get("session_flag"):
         argv.extend([record["session_flag"], pane])
     if goal:
+        # A goal that begins with "-" is an option of this CLI unless "--"
+        # ends the options first. The instructions CLIs take the goal as a
+        # positional prompt.
+        if record.get("instructions_flag"):
+            argv.append("--")
         argv.append(goal)
     return argv
 

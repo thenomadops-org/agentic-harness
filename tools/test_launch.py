@@ -123,6 +123,40 @@ class LaunchTests(unittest.TestCase):
             )
             self.assertEqual(received, plan["argv"][5:])
 
+    def test_codex_persona_survives_the_terminal_line_limit(self):
+        # A pane shell in canonical mode keeps 4095 bytes of one line and
+        # discards the rest. Inlining the persona makes that line longer, so
+        # the shell runs a cut command and returns without an answer. The
+        # marker sits at the end, where the cut lands. A goal that begins
+        # with "-" is an option unless it follows "--".
+        goal = "-report the role id"
+        body = (
+            'You are "qa".\n'
+            + ("persona line stays in the file.\n" * 300)
+            + "MARKER_AT_END_347\n"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            vault = os.path.join(tmp, "vault")
+            home = os.path.join(tmp, "home")
+            os.makedirs(vault)
+            os.makedirs(home)
+            _write_persona(vault, "qa", body)
+            code, _output, rows = _launch(
+                home, vault,
+                ["qa", "OPS-347", goal, "--vault", vault],
+                ["codex"],
+                through_shell=True,
+            )
+            self.assertEqual(code, 0)
+            typed = _typed_command(rows)
+            self.assertLessEqual(len(typed.encode()), 4095)
+            received = _vendor_args(home)
+            loaded, used_raw = _codex_developer_instructions(received)
+            self.assertFalse(used_raw)
+            self.assertEqual(loaded, body)
+            self.assertEqual(received[received.index("--") + 1], goal)
+            self.assertFalse(os.path.exists(os.path.join(home, ".codex")))
+
     def test_codex_launch_fails_when_the_persona_file_is_missing(self):
         with tempfile.TemporaryDirectory() as tmp:
             vault = os.path.join(tmp, "vault")
@@ -376,6 +410,13 @@ def _codex_developer_instructions(argv):
     return found
 
 
+def _typed_command(rows):
+    runs = [row for row in rows if row["argv"][1:3] == ["pane", "run"]]
+    if len(runs) != 1:
+        raise AssertionError(f"expected one pane run, got {runs!r}")
+    return " ".join(runs[0]["argv"][4:])
+
+
 def _vendor_args(home):
     path = os.path.join(home, "bin", "vendor.jsonl")
     with open(path, encoding="utf-8") as handle:
@@ -406,6 +447,11 @@ def _fake_path(bindir, vendor_commands, through_shell=False):
             "    raise SystemExit(0)\n"
             "if sys.argv[1:3] == ['pane', 'run']:\n"
             "    command = ' '.join(sys.argv[4:])\n"
+            # A canonical terminal line holds 4095 bytes. The rest is discarded
+            # and the shell still executes what arrived.
+            "    raw = command.encode()\n"
+            "    if len(raw) > 4095:\n"
+            "        command = raw[:4095].decode('utf-8', 'ignore')\n"
             "    raise SystemExit(subprocess.call(['/bin/sh', '-c', command]))\n"
             "raise SystemExit(0)\n"
         )
