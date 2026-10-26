@@ -9,6 +9,7 @@ import contextlib
 import io
 import json
 import os
+import shlex
 import stat
 import tempfile
 import unittest
@@ -41,6 +42,36 @@ class LaunchTests(unittest.TestCase):
             self.assertIn("vendor: grok", output)
             self.assertIn("build the adapter", output)
             self.assertFalse(os.path.exists(os.path.join(home, ".claude")))
+
+    def test_goal_with_spaces_and_a_quote_is_one_vendor_argument(self):
+        # herdr joins the command tail and runs it through a shell. An unquoted
+        # goal is word-split, so "test" arrives as its own vendor argument and
+        # the quote characters never do.
+        goal = 'build the "adapter" test'
+        with tempfile.TemporaryDirectory() as tmp:
+            vault = os.path.join(tmp, "vault")
+            home = os.path.join(tmp, "home")
+            os.makedirs(vault)
+            os.makedirs(home)
+            code, _output, _rows = _launch(
+                home, vault,
+                ["engineer-1", "OPS-347", goal, "--vault", vault],
+                ["grok"],
+                through_shell=True,
+            )
+            self.assertEqual(code, 0)
+            plan = vendors.plan_session(
+                "engineer-1", "OPS-347", ["grok"], goal=goal,
+            )
+            with open(os.path.join(home, "bin", "vendor.jsonl"), encoding="utf-8") as handle:
+                vendor_rows = [json.loads(line) for line in handle if line.strip()]
+            self.assertEqual(len(vendor_rows), 1)
+            received = vendor_rows[0]["argv"][1:]
+            self.assertEqual(received, plan["argv"][5:])
+            self.assertEqual(received[-1], goal)
+            self.assertIn(" ", received[-1])
+            self.assertIn('"', received[-1])
+            self.assertNotIn("test", received)
 
     def test_dry_run_prints_the_plan_and_does_not_run_herdr(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -112,7 +143,9 @@ class LaunchTests(unittest.TestCase):
             self.assertEqual(plan["vendor"], "grok")
             self.assertNotEqual(plan["vendor"], "codex")
             self.assertNotEqual(ran["argv"][4], "codex")
-            self.assertEqual(ran["argv"][4:], plan["argv"][4:])
+            self.assertEqual(
+                ran["argv"][4:], [shlex.quote(part) for part in plan["argv"][4:]],
+            )
             self.assertFalse(os.path.exists(os.path.join(home, ".claude")))
 
     def test_every_rendered_agent_posts_or_stays_quiet(self):
@@ -144,11 +177,12 @@ class LaunchTests(unittest.TestCase):
         # A shebang recorder sees its own path as argv[0]. herdr addresses a
         # pane by the id workspace create returned, so that slot differs from
         # the plan's pane name. The command after it is the plan's argv.
+        quoted = [shlex.quote(part) for part in planned[4:]]
         matches = [
             row for row in rows
             if os.path.basename(row["argv"][0]) == planned[0]
             and row["argv"][1:3] == ["pane", "run"]
-            and row["argv"][4:] == planned[4:]
+            and row["argv"][4:] == quoted
         ]
         self.assertEqual(len(matches), 1)
         self.assertEqual(matches[0]["argv"][3], "pane-1")
@@ -169,13 +203,14 @@ class LaunchTests(unittest.TestCase):
         self.assertIn("--cwd", opened[0]["argv"])
 
 
-def _launch(home, vault, args, vendor_commands):
+def _launch(home, vault, args, vendor_commands, through_shell=False):
     bindir = os.path.join(home, "bin")
-    record = _fake_path(bindir, vendor_commands)
+    record = _fake_path(bindir, vendor_commands, through_shell=through_shell)
     saved = os.environ.copy()
     os.environ["HOME"] = home
     os.environ["PATH"] = bindir
     os.environ["HERDR_RECORD"] = record
+    os.environ["VENDOR_RECORD"] = os.path.join(bindir, "vendor.jsonl")
     stdout = io.StringIO()
     try:
         with contextlib.redirect_stdout(stdout):
@@ -193,12 +228,39 @@ def _launch(home, vault, args, vendor_commands):
     return code, stdout.getvalue(), rows
 
 
-def _fake_path(bindir, vendor_commands):
+def _fake_path(bindir, vendor_commands, through_shell=False):
     os.makedirs(bindir)
     record = os.path.join(bindir, "record.jsonl")
     herdr = os.path.join(bindir, "herdr")
-    with open(herdr, "w", encoding="utf-8") as handle:
-        handle.write(
+    if through_shell:
+        # pane run joins the command tail and hands that line to a shell,
+        # the same way the real runner sends the line to the pane shell.
+        herdr_body = (
+            "#!/usr/bin/python3\n"
+            "import json, os, subprocess, sys\n"
+            "path = os.environ['HERDR_RECORD']\n"
+            "with open(path, 'a', encoding='utf-8') as handle:\n"
+            "    handle.write(json.dumps({'argv': sys.argv, 'cwd': os.getcwd()}) + '\\n')\n"
+            "if sys.argv[1:3] == ['workspace', 'create']:\n"
+            "    json.dump({'result': {'root_pane': {'pane_id': 'pane-1'},"
+            " 'tab': {'tab_id': 'tab-1'}}}, sys.stdout)\n"
+            "    raise SystemExit(0)\n"
+            "if sys.argv[1:3] == ['pane', 'rename']:\n"
+            "    raise SystemExit(0)\n"
+            "if sys.argv[1:3] == ['pane', 'run']:\n"
+            "    command = ' '.join(sys.argv[4:])\n"
+            "    raise SystemExit(subprocess.call(['/bin/sh', '-c', command]))\n"
+            "raise SystemExit(0)\n"
+        )
+        vendor_body = (
+            "#!/usr/bin/python3\n"
+            "import json, os, sys\n"
+            "path = os.environ['VENDOR_RECORD']\n"
+            "with open(path, 'a', encoding='utf-8') as handle:\n"
+            "    handle.write(json.dumps({'argv': sys.argv}) + '\\n')\n"
+        )
+    else:
+        herdr_body = (
             "#!/usr/bin/python3\n"
             "import json, os, sys\n"
             "path = os.environ['HERDR_RECORD']\n"
@@ -208,11 +270,14 @@ def _fake_path(bindir, vendor_commands):
             "    json.dump({'result': {'root_pane': {'pane_id': 'pane-1'},"
             " 'tab': {'tab_id': 'tab-1'}}}, sys.stdout)\n"
         )
+        vendor_body = "#!/bin/sh\nexit 0\n"
+    with open(herdr, "w", encoding="utf-8") as handle:
+        handle.write(herdr_body)
     os.chmod(herdr, os.stat(herdr).st_mode | stat.S_IEXEC)
     for name in vendor_commands:
         path = os.path.join(bindir, name)
         with open(path, "w", encoding="utf-8") as handle:
-            handle.write("#!/bin/sh\nexit 0\n")
+            handle.write(vendor_body)
         os.chmod(path, os.stat(path).st_mode | stat.S_IEXEC)
     return record
 

@@ -9,9 +9,10 @@ from vendors.plan_session, including the rule that QA uses another vendor
 when more than one is installed. This prints the plan, opens a pane whose
 shell starts in the vault, and runs that herdr command. herdr addresses a
 pane by id, so the pane slot of the planned argv is the id just created.
-The vendor command, model, agent, and goal stay as planned. Nothing is
-written under the home directory. A dry run prints the plan and does not
-run herdr.
+herdr joins the command tail and sends that line through a shell, so each
+element of the tail is shell-quoted first. The pane id is not quoted: herdr
+reads it itself. Nothing is written under the home directory. A dry run
+prints the plan and does not run herdr.
 """
 
 import argparse
@@ -119,6 +120,9 @@ def main(argv=None):
         print("error: planned argv is not a herdr pane run", file=sys.stderr)
         return 1
     argv[3] = pane_id
+    # The pane shell word-splits this tail. Quote every element so a goal
+    # that contains spaces or quotes stays one argument.
+    argv[4:] = [shlex.quote(part) for part in argv[4:]]
     print(f"pane_id: {pane_id}")
     completed = subprocess.run(argv, cwd=vault, check=False)
     return completed.returncode
