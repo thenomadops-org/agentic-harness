@@ -348,6 +348,7 @@ class LaunchTests(unittest.TestCase):
                 self.assertIn("QA fail", text)
                 self.assertIn("blocked", text)
                 self.assertIn("say nothing", text)
+                self.assertIn("no-tracker:", text)
                 lowered = text.lower()
                 self.assertNotIn("slack", lowered)
                 self.assertNotRegex(lowered, r"tower[0-9]")

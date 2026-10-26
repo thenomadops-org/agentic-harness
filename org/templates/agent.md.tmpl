@@ -112,7 +112,9 @@ not whether a report came back.
 **Post the outcome.** When `team-post` is on PATH, post done, ready for QA,
 QA pass, QA fail, or blocked by running `team-post` with your vendor id.
 Your vendor id is the id of the CLI that started this session. When
-`team-post` is not on PATH, say nothing.
+`team-post` is not on PATH, say nothing. When you have no tracker access,
+post `no-tracker: <ITEM-KEY> | <status name> | <one line>` by running
+`team-post` with your vendor id.
 
 **Before you ship a sentence, ask what would falsify it:** *if this became false,
 what would go red?* If the answer is nothing, you are asserting, not verifying.
