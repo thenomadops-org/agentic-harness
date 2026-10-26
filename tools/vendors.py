@@ -122,7 +122,8 @@ def bind_shared_memory(vault, vendors_path=None, routing_path=None):
     kept for that path. When legacy directories hold different bytes at the
     same relative path, each distinct body is kept: the later copy is renamed,
     and the rename is printed. A later file that already uses that new name
-    is renamed again, so the planned rename is not overwritten. A file already
+    is renamed again when its bytes differ, and dropped when they match, so
+    the planned rename is not overwritten and not stored twice. A file already
     in the store with different
     bytes is refused and left where it is.
     """
@@ -361,6 +362,10 @@ def _plan_link(link, store, claimed, copies, vendor_id, reports):
                     f"memory: kept both copies of {rel}; "
                     f"renamed the {vendor_id} copy to {renamed}"
                 )
+                # The reserved file stays claimed[rel]. This comparison already
+                # appended it, and every later collision on this path appends
+                # it again. Seeding copies records that same file. It does not
+                # decide this comparison, which has already run.
                 if occupant is not None and rel not in copies:
                     copies[rel] = [occupant]
                 copies.setdefault(rel, []).append(src)

@@ -522,6 +522,90 @@ class VendorTests(unittest.TestCase):
                 self.assertEqual(_body(link, "same-grok-third.md"), "mine\n")
             self.assertEqual(_real_memory_dirs(vault), 1)
 
+    def test_rename_target_with_the_same_bytes_is_not_stored_twice(self):
+        # codex same.md=c, grok same.md=g, third same-grok.md=g. The third
+        # file matches the body reserved at same-grok.md, so it is dropped.
+        # Deleting the priors.append(occupant) line stores same-grok-third.md
+        # as a second g and this fails.
+        #
+        # copies[rel] = [occupant] runs only after that comparison, and only
+        # when the bytes differ. A later collision reads the reserved file
+        # from claimed again, so the seed does not keep another body.
+        with tempfile.TemporaryDirectory() as tmp:
+            vendors_path = _catalog_with_third(tmp)
+            vault = os.path.join(tmp, "vault")
+            codex = os.path.join(vault, ".codex", "memory")
+            grok = os.path.join(vault, ".grok", "memory")
+            third = os.path.join(vault, ".third", "memory")
+            os.makedirs(codex)
+            os.makedirs(grok)
+            os.makedirs(third)
+            with open(os.path.join(codex, "same.md"), "w", encoding="utf-8") as handle:
+                handle.write("c\n")
+            with open(os.path.join(grok, "same.md"), "w", encoding="utf-8") as handle:
+                handle.write("g\n")
+            with open(os.path.join(third, "same-grok.md"), "w", encoding="utf-8") as handle:
+                handle.write("g\n")
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output):
+                vendors.bind_shared_memory(vault, vendors_path=vendors_path)
+            store = os.path.join(vault, ".claude", "memory")
+            names = _memory_names(store)
+            self.assertEqual(names, ["same-grok.md", "same.md"])
+            self.assertEqual(_body(store, "same.md"), "c\n")
+            self.assertEqual(_body(store, "same-grok.md"), "g\n")
+            self.assertNotIn("same-grok-third.md", names)
+            self.assertEqual(output.getvalue().count("kept both copies of same.md"), 1)
+            self.assertNotIn("same-grok-third.md", output.getvalue())
+            for link in (codex, grok, third):
+                self.assertTrue(os.path.islink(link))
+                self.assertEqual(_body(link, "same.md"), "c\n")
+                self.assertEqual(_body(link, "same-grok.md"), "g\n")
+            self.assertEqual(_real_memory_dirs(vault), 1)
+
+    def test_walk_order_does_not_change_which_name_is_kept(self):
+        # The planner sorts directory and file names. This walk yields both
+        # reversed. Deleting filenames.sort() lets same.md land on
+        # same-grok.md and drops mine from that name. Deleting dirnames.sort()
+        # plans b/ before a/, so the a/n.md report is no longer first.
+        with tempfile.TemporaryDirectory() as vault:
+            codex = os.path.join(vault, ".codex", "memory")
+            grok = os.path.join(vault, ".grok", "memory")
+            for folder, bodies in (
+                (codex, {"same.md": "c\n", "a/n.md": "ca\n", "b/n.md": "cb\n"}),
+                (grok, {
+                    "same.md": "g\n",
+                    "same-grok.md": "mine\n",
+                    "a/n.md": "ga\n",
+                    "b/n.md": "gb\n",
+                }),
+            ):
+                for name, body in bodies.items():
+                    path = os.path.join(folder, name)
+                    os.makedirs(os.path.dirname(path), exist_ok=True)
+                    with open(path, "w", encoding="utf-8") as handle:
+                        handle.write(body)
+            output = io.StringIO()
+            original = vendors.os.walk
+            vendors.os.walk = _reversed_walk(original)
+            try:
+                with contextlib.redirect_stdout(output):
+                    vendors.bind_shared_memory(vault)
+            finally:
+                vendors.os.walk = original
+            store = os.path.join(vault, ".claude", "memory")
+            self.assertEqual(_body(store, "same.md"), "c\n")
+            self.assertEqual(_body(store, "same-grok.md"), "mine\n")
+            self.assertEqual(_body(store, "same-grok-2.md"), "g\n")
+            self.assertEqual(_body(store, "a/n.md"), "ca\n")
+            self.assertEqual(_body(store, "a/n-grok.md"), "ga\n")
+            self.assertEqual(_body(store, "b/n.md"), "cb\n")
+            self.assertEqual(_body(store, "b/n-grok.md"), "gb\n")
+            text = output.getvalue()
+            self.assertLess(text.find("a/n.md"), text.find("b/n.md"))
+            self.assertIn("renamed the grok copy to same-grok-2.md", text)
+            self.assertEqual(_real_memory_dirs(vault), 1)
+
     def test_three_identical_memories_collapse_to_one(self):
         with tempfile.TemporaryDirectory() as tmp:
             vendors_path = _catalog_with_third(tmp)
@@ -665,6 +749,26 @@ def _memory_bodies(root):
             with open(os.path.join(dirpath, name), encoding="utf-8") as handle:
                 bodies.append(handle.read())
     return bodies
+
+
+def _memory_names(root):
+    names = []
+    for dirpath, _dirnames, filenames in os.walk(root):
+        for name in filenames:
+            names.append(os.path.relpath(os.path.join(dirpath, name), root))
+    return sorted(names)
+
+
+def _reversed_walk(original):
+    """Yield each directory with siblings reversed, before the planner sorts."""
+    def walk(top, topdown=True, onerror=None, followlinks=False):
+        for dirpath, dirnames, filenames in original(
+            top, topdown=topdown, onerror=onerror, followlinks=followlinks
+        ):
+            dirnames[:] = sorted(dirnames, reverse=True)
+            filenames[:] = sorted(filenames, reverse=True)
+            yield dirpath, dirnames, filenames
+    return walk
 
 
 def _real_memory_dirs(vault):
