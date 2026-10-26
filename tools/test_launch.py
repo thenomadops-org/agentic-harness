@@ -428,14 +428,18 @@ class EngineeringGridTests(unittest.TestCase):
             }
             with open(state, "w", encoding="utf-8") as handle:
                 json.dump(existing, handle)
-            for index in range(5):
-                code, _output, _rows = _launch(
+            personas = [
+                "engineer-1", "engineer-2", "ios-engineer",
+                "android-engineer", "devops",
+            ]
+            for persona in personas:
+                code, output, _rows = _launch(
                     home, vault,
-                    [f"engineer-{index + 1}", "OPS-370", "build it", "--vault", vault],
+                    [persona, "OPS-370", "build it", "--vault", vault],
                     ["grok"],
                     grid_state=state,
                 )
-                self.assertEqual(code, 0)
+                self.assertEqual(code, 0, output)
                 shutil.rmtree(os.path.join(home, "bin"))
             with open(state, encoding="utf-8") as handle:
                 final = json.load(handle)
@@ -451,6 +455,9 @@ class EngineeringGridTests(unittest.TestCase):
                 self.assertEqual(pane["rect"]["height"], 30)
                 self.assertEqual(pane["cwd"], os.path.realpath(vault))
             self.assertEqual(len(by_label["eng-2"]["panes"]), 1)
+            self.assertEqual(
+                by_label["eng-2"]["panes"][0].get("name"), "devops-OPS-370",
+            )
             names = sorted(p.get("name") for p in eng)
             self.assertEqual(len(set(names)), 4)
 
