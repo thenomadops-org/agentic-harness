@@ -38,6 +38,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import miniyaml  # noqa: E402
 import render  # noqa: E402
+import vendors  # noqa: E402
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SEED = os.path.join(ROOT, "vault-seed")
@@ -244,6 +245,9 @@ def main(argv=None):
         print("  survives the persona migration. Copy authored Soul or memory content")
         print("  into the matching current persona directory before removing an orphan.")
 
+    vendors.bind_shared_memory(vault)
+    print("memory: one shared store")
+
     print("\nNext:")
     print(f"  cd {vault} && python3 .claude/skills/install-org/install.py")
     print("  python3 lint_vault.py")
@@ -253,6 +257,6 @@ def main(argv=None):
 if __name__ == "__main__":
     try:
         raise SystemExit(main())
-    except (render.OrgError, miniyaml.YamlSubsetError) as exc:
+    except (render.OrgError, miniyaml.YamlSubsetError, vendors.VendorError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         raise SystemExit(1)

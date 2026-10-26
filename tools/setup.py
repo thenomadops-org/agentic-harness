@@ -21,6 +21,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import miniyaml  # noqa: E402
 import render  # noqa: E402
+import vendors  # noqa: E402
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SEED = os.path.join(ROOT, "vault-seed")
@@ -180,6 +181,8 @@ def main(argv=None):
         json.dump(config, handle, indent=2, sort_keys=True)
         handle.write("\n")
     print(f"config: {os.path.relpath(config_path, vault)}")
+    vendors.bind_shared_memory(vault)
+    print("memory: one shared store")
 
     print()
     print("Next:")
@@ -195,6 +198,6 @@ def main(argv=None):
 if __name__ == "__main__":
     try:
         raise SystemExit(main())
-    except (render.OrgError, miniyaml.YamlSubsetError) as exc:
+    except (render.OrgError, miniyaml.YamlSubsetError, vendors.VendorError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         raise SystemExit(1)

@@ -51,9 +51,11 @@ leave authored content alone.
   Team/                     shared — one set of people, all clients
   Sessions/                 shared journals
   Clients/<slug>/           per-client knowledge
-  .claude/memory/
+  .claude/memory/           the one memory store
     _shared/                portable discipline — applies everywhere
     <slug>/                 per-client facts
+  .codex/memory             symlink to .claude/memory
+  .grok/memory              symlink to .claude/memory
 ```
 
 One team works every client, and knowledge is namespaced per client rather than
@@ -80,6 +82,8 @@ cd my-org && claude
 ```
 org/
   roles.yaml            the org tree, by role id — the source of truth
+  vendors.yaml          one adapter record per CLI
+  routing.yaml          lead vendor, build lane, QA split, usage floor
   templates/            Soul / Role / agent definitions, with {{tokens}}
 .claude/
   skills/               portable discipline — ships unchanged
