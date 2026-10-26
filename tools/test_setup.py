@@ -20,7 +20,7 @@ import setup  # noqa: E402
 
 
 class _Terminal(io.StringIO):
-    """Stdin that claims to be an interactive terminal."""
+    """A stream that claims to be an interactive terminal."""
 
     def isatty(self):
         return True
@@ -31,10 +31,10 @@ class _Pipe(io.StringIO):
         return False
 
 
-def _run_setup(vault, *extra, stdin=None):
+def _run_setup(vault, *extra, stdin=None, stdout=None):
     argv = ["--vault", vault, "--principal", "owner", "--packs", "core",
             "--tracker", "none", "--today", "2026-01-01", *extra]
-    output = io.StringIO()
+    output = stdout if stdout is not None else io.StringIO()
     with patch.object(sys, "stdin", stdin if stdin is not None else _Pipe("")):
         with contextlib.redirect_stdout(output):
             code = setup.main(argv)
@@ -44,19 +44,19 @@ def _run_setup(vault, *extra, stdin=None):
 
 class SetupExecutionTests(unittest.TestCase):
     def test_empty_answer_defaults_to_local(self):
-        out = io.StringIO()
+        out = _Terminal()
         self.assertEqual(setup.ask_execution(None, _Terminal("\n"), out), "local")
         self.assertIn("own machines or in the cloud", out.getvalue())
         self.assertIn("default: local", out.getvalue())
 
     def test_end_of_input_defaults_to_local(self):
-        self.assertEqual(setup.ask_execution(None, _Terminal(""), io.StringIO()), "local")
+        self.assertEqual(setup.ask_execution(None, _Terminal(""), _Terminal()), "local")
 
     def test_cloud_answer_is_returned(self):
-        self.assertEqual(setup.ask_execution(None, _Terminal("Cloud\n"), io.StringIO()), "cloud")
+        self.assertEqual(setup.ask_execution(None, _Terminal("Cloud\n"), _Terminal()), "cloud")
 
     def test_unknown_answer_asks_again(self):
-        out = io.StringIO()
+        out = _Terminal()
         self.assertEqual(setup.ask_execution(None, _Terminal("maybe\ncloud\n"), out), "cloud")
         self.assertIn("Please answer local or cloud.", out.getvalue())
 
@@ -87,10 +87,20 @@ class SetupExecutionTests(unittest.TestCase):
 
     def test_setup_asks_on_a_terminal_and_saves_the_answer(self):
         with tempfile.TemporaryDirectory() as vault:
-            code, config, output = _run_setup(vault, stdin=_Terminal("cloud\n"))
+            code, config, output = _run_setup(
+                vault, stdin=_Terminal("cloud\n"), stdout=_Terminal())
             self.assertEqual(code, 0)
             self.assertEqual(config["execution"], "cloud")
             self.assertIn("[local/cloud]", output)
+
+    def test_setup_with_captured_output_does_not_read_a_terminal(self):
+        stdin = _Terminal("cloud\n")
+        with tempfile.TemporaryDirectory() as vault:
+            code, config, output = _run_setup(vault, stdin=stdin)
+            self.assertEqual(code, 0)
+            self.assertEqual(config["execution"], "local")
+            self.assertNotIn("[local/cloud]", output)
+            self.assertEqual(stdin.tell(), 0)
 
     def test_setup_rejects_an_unknown_execution(self):
         with contextlib.redirect_stderr(io.StringIO()):

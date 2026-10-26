@@ -35,7 +35,8 @@ Ask conversationally and skip anything already answered.
 6. **Where tasks run.** Ask whether all tasks run on the user's own machines
    (`local`, the default) or in the cloud (`cloud`). Default to their own
    machines; the maintainer's preference is always their own machines. Pass
-   the answer as `--execution`.
+   the answer as `--execution`. `tools/setup.py` asks the same question only
+   when both its input and output are terminals, and otherwise uses `local`.
 
 The SDLC personas are `product`, `engineer`, `ios-engineer`,
 `android-engineer`, `devops`, `qa`, `sre`, and `lead`. Their responsibilities
