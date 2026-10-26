@@ -117,9 +117,15 @@ def launch_persona(persona, ticket, installed, goal="", runner=None, **kwargs):
 def bind_shared_memory(vault, vendors_path=None, routing_path=None):
     """Point every vendor memory path at one directory. Never copy.
 
-    An existing real directory is moved into the store when every file is new
-    or byte-identical. Different bytes for the same relative path are refused
-    and left where they are.
+    An existing real directory is moved into the store. Byte-identical files
+    collapse to one, including a later copy that matches any copy already
+    kept for that path. When legacy directories hold different bytes at the
+    same relative path, each distinct body is kept: the later copy is renamed,
+    and the rename is printed. A later file that already uses that new name
+    is renamed again when its bytes differ, and dropped when they match, so
+    the planned rename is not overwritten and not stored twice. A file already
+    in the store with different
+    bytes is refused and left where it is.
     """
     catalog = load_vendors(vendors_path)
     routing = load_routing(routing_path)
@@ -128,17 +134,22 @@ def bind_shared_memory(vault, vendors_path=None, routing_path=None):
     store = _vault_path(vault, store_rel)
     os.makedirs(store, exist_ok=True)
 
+    claimed = {}
+    copies = {}
+    reports = []
     actions = []
     for record in catalog["vendors"]:
         link_rel = record["memory_link"]
         if os.path.normpath(link_rel) == os.path.normpath(store_rel):
             continue
         link = _vault_path(vault, link_rel)
-        action = _plan_link(link, store)
+        action = _plan_link(link, store, claimed, copies, record["id"], reports)
         if action is not None:
             actions.append(action)
     for action in actions:
         _apply_link(action, store)
+    for line in reports:
+        print(line)
     return store
 
 
@@ -310,8 +321,14 @@ def _vault_path(vault, relative):
     return os.path.join(vault, os.path.normpath(relative))
 
 
-def _plan_link(link, store):
-    """Return a pending link, or None when the path already shares the store."""
+def _plan_link(link, store, claimed, copies, vendor_id, reports):
+    """Return a pending link, or None when the path already shares the store.
+
+    claimed maps a store-relative path to the source file that will occupy it.
+    copies maps an original relative path to every source already kept for it,
+    including renamed ones. Planning sees every legacy directory before any
+    move, so two sources that share a name cannot overwrite each other.
+    """
     if os.path.islink(link):
         if os.path.realpath(link) != os.path.realpath(store):
             raise VendorError(f"{os.path.basename(link)} already points somewhere else")
@@ -321,10 +338,40 @@ def _plan_link(link, store):
     if not os.path.isdir(link):
         raise VendorError(f"{link} exists and is not a directory")
     moves, deletes = [], []
-    for dirpath, _dirnames, filenames in os.walk(link):
+    for dirpath, dirnames, filenames in os.walk(link):
+        # Directory order is not stable. Sort so a taken rename target is
+        # skipped the same way every time.
+        dirnames.sort()
+        filenames.sort()
         for name in filenames:
             src = os.path.join(dirpath, name)
             rel = os.path.relpath(src, link)
+            if rel in copies or rel in claimed:
+                # `claimed` covers a rename reserved earlier in this planning
+                # pass. That destination is not on disk yet, so a later vendor
+                # file with the same name must not be planned onto it.
+                priors = list(copies.get(rel, []))
+                occupant = claimed.get(rel)
+                if occupant is not None and occupant not in priors:
+                    priors.append(occupant)
+                if priors and _same_as_any(src, priors):
+                    deletes.append(src)
+                    continue
+                renamed = _renamed_relative(rel, vendor_id, claimed, store)
+                reports.append(
+                    f"memory: kept both copies of {rel}; "
+                    f"renamed the {vendor_id} copy to {renamed}"
+                )
+                # The reserved file stays claimed[rel]. This comparison already
+                # appended it, and every later collision on this path appends
+                # it again. Seeding copies records that same file. It does not
+                # decide this comparison, which has already run.
+                if occupant is not None and rel not in copies:
+                    copies[rel] = [occupant]
+                copies.setdefault(rel, []).append(src)
+                claimed[renamed] = src
+                moves.append((src, os.path.join(store, renamed)))
+                continue
             dst = os.path.join(store, rel)
             if os.path.lexists(dst):
                 if os.path.isfile(src) and os.path.isfile(dst) and _same_bytes(src, dst):
@@ -333,8 +380,25 @@ def _plan_link(link, store):
                 raise VendorError(
                     f"shared memory already has {rel} and {link} has different contents"
                 )
+            claimed[rel] = src
+            copies[rel] = [src]
             moves.append((src, dst))
     return {"link": link, "moves": moves, "deletes": deletes, "replace_dir": True}
+
+
+def _renamed_relative(rel, vendor_id, claimed, store):
+    """Pick a free store-relative path for a second copy of rel."""
+    directory, name = os.path.split(rel)
+    stem, ext = os.path.splitext(name)
+    number = 0
+    while number < 1000:
+        label = vendor_id if number == 0 else f"{vendor_id}-{number + 1}"
+        filename = f"{stem}-{label}{ext}"
+        candidate = os.path.join(directory, filename) if directory else filename
+        if candidate not in claimed and not os.path.lexists(os.path.join(store, candidate)):
+            return candidate
+        number += 1
+    raise VendorError(f"no free name for {rel}")
 
 
 def _apply_link(action, store):
@@ -353,3 +417,11 @@ def _apply_link(action, store):
 def _same_bytes(left, right):
     with open(left, "rb") as left_handle, open(right, "rb") as right_handle:
         return left_handle.read() == right_handle.read()
+
+
+def _same_as_any(src, priors):
+    """True when src matches any source already kept for the same path."""
+    for prior in priors:
+        if _same_bytes(src, prior):
+            return True
+    return False
