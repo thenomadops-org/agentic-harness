@@ -1,8 +1,8 @@
 # Agentic OS
 
-A packaged agentic workforce. You clone it, run one skill, answer some questions,
-and you have a named org of Claude agents with a reporting line, persistent
-memory, a shared knowledge vault, and the engineering discipline already wired in.
+A packaged agentic workforce. Clone it, run one skill, choose roles, and get an
+org of role personas with a reporting line, persistent memory, a shared
+knowledge vault, and engineering discipline already wired in.
 
 It is extracted from a working org — fifteen agents that ship a real product —
 rather than designed in the abstract. The skills in here are the ones that
@@ -19,10 +19,10 @@ The harness rewrite is in progress (OPS-332..340). The full rewrite is OPS-334.
 ## What you get
 
 - **An org tree.** Roles with a real reporting line, decision rights, and
-  escalation paths — not fifteen interchangeable assistants.
-- **Named people.** Each role gets a persistent identity: a Soul (who they are,
-  how they fail), a Role (what they own, what they may decide alone), and a
-  private memory that compounds across sessions.
+  escalation paths.
+- **Role personas.** Each role id is its stable display and agent identity. A
+  live session is named `<persona>-<TICKET>`. Each role gets a Soul, a Role,
+  and a private memory that compounds across sessions.
 - **The discipline.** `write-a-gate`, `deploy-and-prove`, `prove-recovery`,
   `merge-pr` — skills that encode hard-won rules like *prove a CI check can fail
   before you trust it* and *a green apply is not a deployed image*.
@@ -35,21 +35,11 @@ The harness rewrite is in progress (OPS-332..340). The full rewrite is OPS-334.
 
 Three, and they explain most of the structure.
 
-**1. Role ID is the key. The name is presentation — and at runtime it is not even
-an address.**
-Internals reference `chief-of-staff`, never `joe`. Names are applied at
-generation time from a theme, a list you supply, or the defaults. This is what
-makes "name them after the cast of Friends" a cosmetic choice instead of a
-rewrite.
-
-The runtime half is the part that bites. A name can resolve to a *spawnable agent
-type* and to *one or more live sessions* at the same instant, indistinguishable in
-a message — that produced five misroutes in one night, including a near-miss where
-an agent was asked to ratify a design artifact it had never written. Agents address
-each other by session id and attribute work by the commit that touched the
-artifact, because every agent commits under the principal's git identity and the
-author field therefore carries no information at all. See
-[docs/FIELD-NOTES.md](docs/FIELD-NOTES.md) §1.
+**1. Role id is the identity.**
+The role id is the display label, generated agent id, and persona key. A live
+session appends its ticket, such as `engineer-OPS-345`. Multi-seat roles add a
+stable seat number (`engineer-1`, `engineer-2`) before the ticket. This keeps
+role selection and live work sessions distinct.
 
 **2. The vault is yours; this repo is not.**
 Your knowledge, memory and team files live in a vault directory that this repo
@@ -90,7 +80,6 @@ cd my-org && claude
 ```
 org/
   roles.yaml            the org tree, by role id — the source of truth
-  naming/themes.yaml    name sets (defaults, Friends, singers, …)
   templates/            Soul / Role / agent definitions, with {{tokens}}
 .claude/
   skills/               portable discipline — ships unchanged

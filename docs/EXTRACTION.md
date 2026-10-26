@@ -7,20 +7,18 @@ the source vault and its main product repo, not estimated.
 Nothing has been copied yet. This document is the decision; the copying is
 mechanical once it is agreed.
 
-## The finding that shaped the architecture
+## Role personas
 
-Occurrences of the fifteen agent names across the source tree:
+The workforce is defined by role ids, not personal identities. The role id is
+the display label and generated agent id; each live session appends its ticket
+as `<persona>-<TICKET>`. Multi-seat roles use a stable numeric suffix before the
+ticket, such as `engineer-1-OPS-345`. This keeps one persona definition distinct
+from each active session.
 
-| Location | Name references |
-|---|---|
-| `.claude/agents/` | 195 |
-| `Team/` | every directory and filename |
-| `.claude/skills/` | **0** |
-
-**The skills are already persona-free.** That was not designed in; it is a happy
-accident of having written them as procedures rather than as instructions to
-people. It means the expensive part — the discipline — ports unchanged, and the
-naming problem is confined to a layer that is generated anyway.
+The SDLC roles are `product`, `engineer`, `ios-engineer`, `android-engineer`,
+`devops`, `qa`, `sre`, and `lead`. Their responsibilities follow the stage
+table in the workforce guidance. `org/roles.yaml` is the single source for
+these ids and their reporting lines.
 
 ## Coupling measurement
 
@@ -63,7 +61,7 @@ edited.
 These encode discipline that is true of any repo: prove a gate can fail before
 trusting it, restore into a scratch target before claiming a backup works, assert
 the running image digest actually moved, verify a PR contains the commit you
-reviewed. The scrub is replacing named examples with placeholders — the
+reviewed. The scrub is replacing identity-specific examples with placeholders — the
 procedures do not change.
 
 ### Becomes an adapter
@@ -127,11 +125,11 @@ local-hardware atom.
 ## A drift the generated model would have prevented
 
 `Team-ORG.md` records that the Motion seat was retired 2026-08-14 and its remit
-folded into **Iris, Product Designer (UI & Interaction)**. `.claude/agents/iris.md`
-still describes that role as **Visual Designer**, scoped to type, colour and elevation —
+folded into **the product-design role**. the generated product persona definition
+still describes that role with an outdated scope, scoped to type, colour and elevation —
 the pre-amendment role.
 
-Two hand-maintained files describing one person, disagreeing about the same job. This
+Two hand-maintained files describing one persona, disagreeing about the same job. This
 is the argument for `roles.yaml` as a single source with the agent definition
 generated from it: the drift becomes impossible rather than merely discouraged.
 
@@ -164,10 +162,10 @@ cheap to reverse now and expensive later.
 
 ## Order of work
 
-1. `roles.yaml` + naming themes + templates — **done**
-2. Move the seven portable skills, scrub the named examples — **done**
-3. `setup-my-org`, proven by generating a *second* org under a different theme
-   in a scratch directory and having one agent state its own name and manager
+1. `roles.yaml` + role templates — **done**
+2. Move the seven portable skills and remove identity-specific examples — **done**
+3. `setup-my-org`, proven by generating a second org with different packs
+   and asking one persona to state its role id and manager
 4. Adapter interface + `github-issues`
 5. Seed memory
 6. `org update`
@@ -183,7 +181,7 @@ argument `write-a-gate` makes about CI checks.
 The first pass moved the **skills**: procedures an agent reads at a decision
 point. This one moves the **guards**: files a repo owns and CI executes, plus the
 one control that runs *before* the tool call. Six agents built these in the
-source product repo over a single day and each named what generalises; every
+source product repo over a single day and identified what applies across orgs; every
 claim below was verified against the file rather than taken from the report.
 
 Everything landed in `.claude/skills/new-project/seed/tier0/` — the seed, not a

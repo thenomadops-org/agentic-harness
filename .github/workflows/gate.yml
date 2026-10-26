@@ -118,69 +118,59 @@ jobs:
           PY
 
   render:
-    name: an org actually generates
+    name: an org renders role personas only
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - name: python version
         run: python3 -c 'import sys; assert sys.version_info >= (3, 11), sys.version; print(sys.version)'
 
-      - name: render two orgs and prove role ids are stable
+      - name: role identity boundary and tests
         run: |
           set -e
-          mkdir -p ${RUNNER_TEMP}/v1 ${RUNNER_TEMP}/v2
-          cp -r vault-seed/. ${RUNNER_TEMP}/v1/
-          cp -r vault-seed/. ${RUNNER_TEMP}/v2/
-          python3 tools/render.py --principal Alex --theme default \
-            --packs core,engineering,product,operations,process,gtm,legal \
-            --vault ${RUNNER_TEMP}/v1 --out ${RUNNER_TEMP}/v1 --today 2026-01-01 > /dev/null
-          python3 tools/render.py --principal Sam --theme greek \
-            --packs core,engineering --posture frugal \
-            --vault ${RUNNER_TEMP}/v2 --out ${RUNNER_TEMP}/v2 --today 2026-01-01 > /dev/null
+          python3 tools/persona-boundary-check.py
+          python3 tools/test_personas.py
 
-          # The architectural claim: names are cosmetic, role ids are the key.
-          # Find the file holding chief-of-staff in each org. Exactly one, and
-          # the two must have DIFFERENT names but the SAME role id.
-          a=$(grep -rl 'role id is' ${RUNNER_TEMP}/v1/.claude/agents/ | xargs grep -l '`chief-of-staff`')
-          b=$(grep -rl 'role id is' ${RUNNER_TEMP}/v2/.claude/agents/ | xargs grep -l '`chief-of-staff`')
-          test "$(echo "$a" | wc -l)" = "1" || { echo "::error::v1: chief-of-staff in $(echo "$a" | wc -l) files"; exit 1; }
-          test "$(echo "$b" | wc -l)" = "1" || { echo "::error::v2: chief-of-staff in $(echo "$b" | wc -l) files"; exit 1; }
-          an=$(basename "$a"); bn=$(basename "$b")
-          echo "chief-of-staff is $an in org 1, $bn in org 2"
-          test "$an" != "$bn" \
-            || { echo "::error::both themes produced $an — naming is not cosmetic"; exit 1; }
-          echo "role id stable across themes, names differ"
+      - name: role ids render as display and agent identities
+        run: |
+          set -e
+          mkdir -p ${RUNNER_TEMP}/org
+          cp -r vault-seed/. ${RUNNER_TEMP}/org/
+          python3 tools/render.py --principal owner \
+            --packs core,engineering,product,operations \
+            --vault ${RUNNER_TEMP}/org --out ${RUNNER_TEMP}/org --today 2026-01-01 > /dev/null
+          test -f ${RUNNER_TEMP}/org/.claude/agents/lead.md
+          test -f ${RUNNER_TEMP}/org/.claude/agents/engineer-1.md
+          test -f ${RUNNER_TEMP}/org/.claude/agents/engineer-2.md
+          grep -q '| engineer-1 |' ${RUNNER_TEMP}/org/Team/Team-ORG.md
+          grep -q '<persona>-<TICKET>' ${RUNNER_TEMP}/org/Team/Team-ORG.md
+          echo "role ids and numbered seats rendered as personas"
+
+      - name: setup and render reject custom person labels
+        run: |
+          set -e
+          if python3 tools/render.py --principal owner --packs core \
+               --names Persona,Colleague,Operator \
+               --vault ${RUNNER_TEMP}/org --out ${RUNNER_TEMP}/rejected --plan \
+               > /dev/null 2>&1; then
+            echo "::error::render accepted custom session labels"
+            exit 1
+          fi
+          if python3 tools/setup.py --vault ${RUNNER_TEMP}/new-org \
+               --principal owner --names Persona,Colleague,Operator > /dev/null 2>&1; then
+            echo "::error::setup accepted custom session labels"
+            exit 1
+          fi
+          test ! -e ${RUNNER_TEMP}/rejected
+          echo "custom person labels rejected before writes"
 
       - name: no unrendered template tokens
         run: |
-          # Scan the RENDERED zones only. Templates/ holds placeholder tokens by
-          # design — that is what makes it a template. This step failed on its
-          # first run for exactly that reason, which is the second time
-          # token-bearing templates have tripped a checker written to find
-          # token leakage. If a third checker walks the vault, exclude
-          # Templates/ before running it.
-          leak=0
-          for org in ${RUNNER_TEMP}/v1 ${RUNNER_TEMP}/v2; do
-            if grep -rn '{{' "$org/.claude/agents" "$org/Team" --include='*.md' \
-                 | grep -v '<!--'; then
-              leak=1
-            fi
-          done
-          if [ "$leak" = "1" ]; then
+          if grep -rn '{{' "${RUNNER_TEMP}/org/.claude/agents" "${RUNNER_TEMP}/org/Team" --include='*.md' | grep -v '<!--'; then
             echo "::error::template tokens leaked into rendered output"
             exit 1
           fi
           echo "no leakage in rendered output"
-
-      - name: a failed render writes nothing
-        run: |
-          rm -rf ${RUNNER_TEMP}/should-not-exist
-          python3 tools/render.py --principal P --vault ${RUNNER_TEMP}/v1 \
-            --out ${RUNNER_TEMP}/should-not-exist --names Claude,Bill,John --packs core \
-            > /dev/null 2>&1 && { echo "::error::reserved name accepted"; exit 1; }
-          test ! -e ${RUNNER_TEMP}/should-not-exist \
-            || { echo "::error::a failed render left files behind"; exit 1; }
-          echo "validation precedes writes, as designed"
 
   vault:
     name: the vault lint can fail
@@ -195,7 +185,7 @@ jobs:
           set -e
           mkdir -p ${RUNNER_TEMP}/vault
           cp -r vault-seed/. ${RUNNER_TEMP}/vault/
-          python3 tools/render.py --principal Alex --theme default \
+          python3 tools/render.py --principal owner \
             --packs core,engineering --vault ${RUNNER_TEMP}/vault --out ${RUNNER_TEMP}/vault \
             --today 2026-01-01 > /dev/null
           cd ${RUNNER_TEMP}/vault && python3 lint_vault.py
@@ -203,7 +193,7 @@ jobs:
       - name: tampering with a generated file fails the lint
         run: |
           cd ${RUNNER_TEMP}/vault
-          echo "" >> Team/Bill-Engineering/Bill-Role.md
+          echo "" >> Team/engineer-1-Engineering/engineer-1-Role.md
           if python3 lint_vault.py > /dev/null 2>&1; then
             echo "::error::lint accepted a hand-edited generated file"
             exit 1
@@ -217,12 +207,12 @@ jobs:
           # and ${RUNNER_TEMP}/vault is not a git checkout so there is nothing to revert.
           rm -rf ${RUNNER_TEMP}/vault2 && mkdir -p ${RUNNER_TEMP}/vault2
           cp -r vault-seed/. ${RUNNER_TEMP}/vault2/
-          python3 tools/render.py --principal Alex --theme default \
+          python3 tools/render.py --principal owner \
             --packs core,engineering --vault ${RUNNER_TEMP}/vault2 --out ${RUNNER_TEMP}/vault2 \
             --today 2026-01-01 > /dev/null
           cd ${RUNNER_TEMP}/vault2
-          printf -- '---\ntitle: "x"\ntype: journal\nagent: bill\ndate: 2026-01-01\n---\n' \
-            > Sessions/Bill_Engineering_2026-01-01.md
+          printf -- '---\ntitle: "x"\ntype: journal\nagent: engineer-1\ndate: 2026-01-01\n---\n' \
+            > Sessions/engineer-1_Engineering_2026-01-01.md
           if python3 lint_vault.py > /dev/null 2>&1; then
             echo "::error::lint accepted a journal with no PRs or token counts"
             exit 1
@@ -333,8 +323,8 @@ jobs:
           export CLAUDE_HOME=${RUNNER_TEMP}/home
           mkdir -p "$CLAUDE_HOME"
 
-          python3 tools/setup.py --vault ${RUNNER_TEMP}/uservault --principal Dana \
-            --packs core,engineering --theme norse --posture frugal \
+          python3 tools/setup.py --vault ${RUNNER_TEMP}/uservault --principal owner \
+            --packs core,engineering --posture frugal \
             --tracker github-issues --tracker-project acme/widgets \
             --today 2026-01-01
 
@@ -349,7 +339,7 @@ jobs:
               || { echo "::error::$s did not reach the user"; exit 1; }
           done
           test -f .claude/org.config.json
-          echo "8 skills and 7 agents installed, vault lints clean"
+          echo "8 skills and 6 personas installed, vault lints clean"
 
       - name: setup refuses to build a second org
         run: |
@@ -361,7 +351,7 @@ jobs:
           echo "one fork, one org — enforced"
 
   update:
-    name: an update preserves what people wrote
+    name: an update preserves authored org content
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -372,12 +362,12 @@ jobs:
         run: |
           set -e
           export CLAUDE_HOME=${RUNNER_TEMP}/uh && mkdir -p "$CLAUDE_HOME"
-          python3 tools/setup.py --vault ${RUNNER_TEMP}/uv --principal Dana \
-            --packs core --theme greek --tracker github-issues \
+          python3 tools/setup.py --vault ${RUNNER_TEMP}/uv --principal owner \
+            --packs core,engineering --tracker github-issues \
             --tracker-project acme/w --today 2026-01-01 > /dev/null
 
-          SOUL=${RUNNER_TEMP}/uv/Team/Athena-EA/Athena-Soul.md
-          ROLE=${RUNNER_TEMP}/uv/Team/Athena-EA/Athena-Role.md
+          SOUL=${RUNNER_TEMP}/uv/Team/engineer-1-Engineering/engineer-1-Soul.md
+          ROLE=${RUNNER_TEMP}/uv/Team/engineer-1-Engineering/engineer-1-Role.md
           printf '\nRewritten by a human.\n' >> "$SOUL"
           printf '\nHAND EDITED\n' >> "$ROLE"
 
@@ -403,8 +393,8 @@ jobs:
         run: |
           set -e
           rm -rf ${RUNNER_TEMP}/ov
-          python3 tools/setup.py --vault ${RUNNER_TEMP}/ov --principal Dana \
-            --packs core,engineering --theme greek --tracker none \
+          python3 tools/setup.py --vault ${RUNNER_TEMP}/ov --principal owner \
+            --packs core,engineering --tracker none \
             --today 2026-01-01 > /dev/null
           before=$(ls ${RUNNER_TEMP}/ov/Team | wc -l)
           python3 - <<PY2

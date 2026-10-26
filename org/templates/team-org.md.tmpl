@@ -11,13 +11,14 @@ created: {{today}}
 
 # The org
 
-**{{seat_count}} people.** Generated from `org/roles.yaml` — naming theme
-`{{theme}}`, budget posture `{{posture}}`.
+**{{seat_count}} personas.** Generated from `org/roles.yaml` — role ids are
+the display and agent ids; live sessions are `<persona>-<TICKET>`. Budget
+posture: `{{posture}}`.
 
 > [!warning] Generated file — do not hand-edit
-> This chart, and every `Team/<Name>-<Role>/` file beside it, is rendered from
+> This chart, and every `Team/<persona>-<Role>/` file beside it, is rendered from
 > `roles.yaml`. Editing here means the next `org update` silently reverts you,
-> and in the meantime two files describe the same person differently. That
+> and in the meantime two files describe the same persona differently. That
 > drift is not hypothetical: it is the specific failure this generation step
 > exists to prevent. **Change `roles.yaml` and re-render.**
 
@@ -31,13 +32,13 @@ created: {{today}}
 {{#principal_decides}}- {{.}}
 {{/principal_decides}}
 
-Everything else is delegated to the person who owns it. The delegation is real:
+Everything else is delegated to the persona that owns it. The delegation is real:
 a lead who has to ask before every call is not a lead, and an org that routes
 every decision to the top decides nothing well.
 
 ## The line, and the two deliberate exceptions
 
-Most people sit in a delivery chain and report to the person accountable for
+Most personas sit in a delivery chain and report to the role accountable for
 their output.
 
 {{#staff}}
@@ -53,15 +54,15 @@ structural and patience is finite.
 The same logic applies wherever a role audits another: put it beside, not
 beneath.
 
-## The people
+## The personas
 
-| Name | Role | Reports to | Model |
+| Persona | Role | Reports to | Model |
 |---|---|---|---|
 {{#seats}}| {{name}} | {{title}} | {{reports_to_name}} | {{model}} |
 {{/seats}}
 
-Each person has three files in `Team/<Name>-<Suffix>/`: a **Soul** (who they
-are, how they fail), a **Role** (what they own, decide, and escalate), and a
+Each persona has three files in `Team/<persona>-<Suffix>/`: a **Soul** (how it
+works and fails), a **Role** (what it owns, decides, and escalates), and a
 **Memory** index that compounds across sessions.
 
 ## Clients

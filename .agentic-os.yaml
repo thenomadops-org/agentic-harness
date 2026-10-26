@@ -1,7 +1,7 @@
 # Project file (portable-workforce spec F3). Validate with
 #   python3 plugin/skills/onboard-project/validate.py
 board_project: Agentic-OS
-roles: [engineer, qa, product, engineering-lead, chief-of-staff, operations-lead]
+roles: [product, engineer, ios-engineer, android-engineer, devops, qa, sre, lead]
 test: python3 tools/check_public.py && python3 tools/test_miniyaml.py && python3 plugin/check_plugin.py . && python3 -m unittest discover -s plugin -p test_check_plugin.py && python3 -m unittest discover -s plugin/skills/onboard-project
 build: python3 -m compileall -q tools plugin
 staging:

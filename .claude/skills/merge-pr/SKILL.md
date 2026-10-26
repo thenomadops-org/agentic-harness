@@ -6,7 +6,7 @@ description: Verify with the GitHub API that a PR contains the commit you review
 # Identify the commit, judge the latest checks, then merge
 
 > **This skill is deliberately repo-local, and there is no global copy. That is
-> the design, not a broken install.** Chris ruled on **2026-08-13**: one
+> the design, not a broken install.** The owner ruled on **2026-08-13**: one
 > `merge-pr`, kept in the repo, "in case we have to get a new local system" — a
 > repo-local skill travels with the checkout and takes precedence over a global
 > one, so each repo always carries its own merge discipline. A vault-global
@@ -358,7 +358,7 @@ done
 Measured, 2026-08-14 — the case that produced this gate. #200 head `414cb977`, #210 head
 `822ac8a5`, `--is-ancestor` **true**, and #210's base was `main`, so query A returned `[]`
 and query B would have printed `CONTAINED-BY #210`. I squashed on A's silence; #210 went
-`BLOCKED` → `DIRTY` with a real conflict in `Theme.kt`.
+`BLOCKED` → `DIRTY` with a real conflict in `View.kt`.
 
 **#209 came through the same squash clean** (`FILES-IDENTICAL (21 compared)`) purely because
 it shared no *files* with #200 — only commits. Do not let that near-miss read as evidence

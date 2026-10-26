@@ -1,6 +1,6 @@
 ---
 name: org-update
-description: Re-render an existing org after changing roles.yaml or pulling base-repo updates — regenerates Team-ORG, Role files and agents while preserving Souls and memory. Use to add a pack, rename someone, change the reporting line, or take upstream skill improvements. Not for creating an org; that is setup-my-org.
+description: Re-render an existing role-persona org after changing roles.yaml or pulling base-repo updates — refreshes generated files while preserving authored content and safely migrating legacy naming settings. Use for org changes or upstream updates, not first-time setup.
 ---
 
 # Update the org
@@ -26,10 +26,9 @@ A Role file describes what the org decided. A Soul describes who someone became.
 Regenerating the first is correct; regenerating the second erases the only thing
 that made it worth having.
 
-**Nothing is ever deleted.** Remove a role from `roles.yaml` and its `Team/`
-directory stays, reported as orphaned. That person has a Soul someone wrote and
-a memory they built — deleting it is a decision, not a cleanup step. Do it by
-hand when you mean it.
+**Nothing is ever deleted.** Remove a role from `roles.yaml` and its old
+`Team/` directory stays, reported as orphaned. It may contain authored Soul,
+memory, or other work. Remove it only by explicit user choice.
 
 ## Changing the shape of the org
 
@@ -37,19 +36,21 @@ Edit **`org/roles.yaml`** — never the generated files. The lint fails on a
 hand-edited generated file precisely because the next update would revert it,
 and until then two files would describe the same person differently.
 
-To change the theme, packs or posture, edit `<vault>/.claude/org.config.json`
-deliberately, then update. That indirection is intentional: an update should not
-be able to quietly rename the whole team.
+Role ids are the display and agent ids. Existing configurations may still
+contain legacy display selectors; update removes those obsolete selectors
+after a successful render, drops retired pack selections, and preserves every
+other configuration value. Old generated directories and files are reported
+and left intact, so authored content is not lost during migration.
 
-Adding a pack adds seats with generated Souls. Say so — the new people need
-their Souls written like everyone else's.
+Adding a pack adds persona seats with generated Soul files. The user should
+write the Souls as part of onboarding.
 
 ## After it runs
 
 1. **`install-org`** — new seats mean new agent files that need linking.
 2. **`lint_vault.py`** — must be clean.
-3. **New Claude session**, then ask a *changed* agent to state its role and
-   manager. If someone's reporting line moved, that is the one to ask.
+3. **New Claude session** named `<persona>-<TICKET>`, then ask a changed persona
+   to state its role id and manager.
 
 Report what changed, what was preserved, and anything orphaned. An update that
 says only "done" hides exactly the information the user needs.

@@ -6,9 +6,9 @@ changes, whenever a skill is improved upstream, or after pulling the base repo.
     python3 tools/update.py --vault ~/vault
     python3 tools/update.py --vault ~/vault --dry-run
 
-Reads the answers back from `<vault>/.claude/org.config.json`, so an update
-cannot silently change the theme, packs or posture. To change those, edit that
-file deliberately and say so.
+Reads the principal, packs, posture and tracker from
+`<vault>/.claude/org.config.json`. Legacy naming settings are removed after a
+successful render; role ids now define every persona.
 
 ## What is safe, and why that is the whole design
 
@@ -100,28 +100,29 @@ def main(argv=None):
 
     print(f"vault:     {vault}")
     print(f"principal: {config['principal']}")
-    print(f"theme:     {config['theme']} · packs {','.join(config['packs'])} "
-          f"· posture {config['posture']}")
-    print(f"(from {os.path.relpath(config_path, vault)} — edit it to change these)\n")
 
     # Work out the seats before touching anything, so a broken roles.yaml
     # fails here rather than halfway through.
     spec = miniyaml.load(render.ROLES)
-    themes = miniyaml.load(render.THEMES)
     render.validate_roles(spec)
-    roles = render.select_roles(spec, config["packs"])
-    names = render.assign_names(roles, config["theme"], themes)
-    render.check_names(names, config["principal"], themes,
-                       strict_pattern=(config["theme"] != "role_ids"))
+    known_packs = set(spec["packs"])
+    packs = [pack for pack in config["packs"] if pack in known_packs]
+    if not packs:
+        packs = [name for name, detail in spec["packs"].items()
+                 if (detail or {}).get("required")]
+    print(f"packs:     {','.join(packs)} · posture {config['posture']}")
+    print(f"(from {os.path.relpath(config_path, vault)} — edit it to change these)\n")
+    roles = render.select_roles(spec, packs)
+    personas = render.persona_ids(roles)
     options = {"principal": config["principal"], "vault": vault,
-               "posture": config["posture"], "theme": config["theme"],
+               "posture": config["posture"],
                "today": args.today or config.get("created", "")}
-    seats = render.build_seats(spec, roles, names, options)
+    seats = render.build_seats(spec, roles, personas, options)
 
     stale = orphaned_seats(vault, seats)
 
     if args.dry_run:
-        print(f"would re-render {len(seats)} seat(s):")
+        print(f"would re-render {len(seats)} persona(s):")
         for seat in seats:
             print(f"  {seat['name']:<16} {seat['title']}")
         print("\nregenerated: Team-ORG.md, *-Role.md, .claude/agents/*")
@@ -137,6 +138,21 @@ def main(argv=None):
     print(f"re-rendered {len(seats)} seat(s)")
     print("  regenerated: Team-ORG.md, *-Role.md, .claude/agents/*")
     print("  preserved:   *-Soul.md, *-Memory.md, Team-Operating-Agreement.md")
+
+    # Old generated seats are reported as orphans, never removed. Keep all
+    # other settings and user-authored fields while dropping retired selectors.
+    migrated = dict(config)
+    migrated.pop("theme", None)
+    migrated.pop("names", None)
+    if migrated.get("packs") != packs:
+        migrated["packs"] = packs
+    if migrated != config:
+        temp_path = config_path + ".tmp"
+        with open(temp_path, "w", encoding="utf-8") as handle:
+            json.dump(migrated, handle, indent=2, sort_keys=True)
+            handle.write("\n")
+        os.replace(temp_path, config_path)
+        print("migrated legacy persona settings; other config values preserved")
 
     # Skills and seed assets improve upstream; an org should be able to take
     # those without a re-setup.
@@ -174,9 +190,8 @@ def main(argv=None):
         print(f"\norphaned Team directories ({len(stale)}):")
         for name in stale:
             print(f"  Team/{name}")
-        print("  Left in place deliberately. A person who no longer exists still")
-        print("  has a Soul someone wrote and a memory they built. Delete only")
-        print("  when you mean it.")
+        print("  Left in place deliberately so authored Soul and memory content")
+        print("  survives the persona migration. Remove only by explicit choice.")
 
     print("\nNext:")
     print(f"  cd {vault} && python3 .claude/skills/install-org/install.py")
