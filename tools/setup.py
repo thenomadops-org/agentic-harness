@@ -1,7 +1,11 @@
 """Create a vault, render role personas into it, and record the choices. Stdlib only.
 
 The one-time step. `setup-my-org` drives the conversation and calls this with
-the answers; nothing here asks questions, so it is equally usable from a script.
+the answers. The one question asked here is where tasks run: when
+`--execution` is not given and stdin is a terminal, setup asks whether all
+tasks run on the user's own machines (`local`) or in the cloud (`cloud`).
+Empty input and non-interactive runs pick `local`, so it stays usable from a
+script.
 
     python3 tools/setup.py --vault ~/my-vault --principal owner \\
         --packs core,engineering --tracker github-issues
@@ -28,6 +32,34 @@ SEED = os.path.join(ROOT, "vault-seed")
 CONFIG_NAME = os.path.join(".claude", "org.config.json")
 
 TRACKERS = ("github-issues", "jira", "none")
+EXECUTION = ("local", "cloud")
+DEFAULT_EXECUTION = "local"
+
+
+def ask_execution(choice=None, stdin=None, stdout=None):
+    """Where all tasks run: the user's own machines (local) or the cloud.
+
+    An explicit choice wins. Otherwise ask, but only on an interactive
+    terminal. Empty input, end of input and non-interactive runs all pick
+    the user's own machines.
+    """
+    if choice:
+        return choice
+    stdin = stdin if stdin is not None else sys.stdin
+    stdout = stdout if stdout is not None else sys.stdout
+    if not (hasattr(stdin, "isatty") and stdin.isatty()):
+        return DEFAULT_EXECUTION
+    while True:
+        stdout.write("Run all tasks on your own machines or in the cloud? "
+                     "[local/cloud] (default: local): ")
+        stdout.flush()
+        line = stdin.readline()
+        answer = line.strip().lower()
+        if not answer:
+            return DEFAULT_EXECUTION
+        if answer in EXECUTION:
+            return answer
+        stdout.write("Please answer local or cloud.\n")
 
 
 def seed_vault(vault):
@@ -107,6 +139,10 @@ def main(argv=None):
     parser.add_argument("--tracker", default="github-issues", choices=TRACKERS)
     parser.add_argument("--tracker-project", default="",
                         help="repo (github-issues) or project key (jira)")
+    parser.add_argument("--execution", default=None, choices=EXECUTION,
+                        help="where all tasks run: local (your own machines, "
+                             "the default) or cloud; asked on a terminal "
+                             "when omitted")
     parser.add_argument("--today", default="")
     parser.add_argument("--force-reseed", action="store_true",
                         help="re-copy seed files, still never clobbering")
@@ -130,10 +166,13 @@ def main(argv=None):
         print("up a second vault.", file=sys.stderr)
         return 1
 
+    execution = ask_execution(args.execution)
+
     print(f"vault:     {vault}")
     print(f"principal: {args.principal}")
     print(f"tracker:   {args.tracker}"
           + (f" ({args.tracker_project})" if args.tracker_project else ""))
+    print(f"execution: {execution}")
     print()
 
     os.makedirs(vault, exist_ok=True)
@@ -170,6 +209,7 @@ def main(argv=None):
         "packs": [p.strip() for p in args.packs.split(",") if p.strip()],
         "posture": args.posture,
         "tracker": {"kind": args.tracker, "project": args.tracker_project},
+        "execution": execution,
         "created": args.today or "unknown",
         "note": "Written by setup. `org update` reads this to re-render "
                 "consistently. Editing it does not change the org — edit "

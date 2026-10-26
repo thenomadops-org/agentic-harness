@@ -19,6 +19,7 @@ import update
 import vendors
 from test_hx_chat import HxChatTests  # gate runs this shared test entry point too
 from test_lead import LeadTests  # gate covers owner-authorized lead state too
+from test_setup import SetupExecutionTests  # gate covers setup's execution question too
 
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
