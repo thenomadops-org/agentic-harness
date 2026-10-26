@@ -79,6 +79,8 @@ class FakeHost:
             "OPS-400": [],
         }
         self.pr_states = {"1894": "MERGED", "1999": "OPEN"}
+        # (number, repo) overrides pr_states so one PR number can differ by repo.
+        self.pr_by_repo = {}
         self.containers = [{"Names": "pg1894"}, {"Names": "pg1999"}, {"Names": "web"},
                            {"Names": "redis-ops-347"}]
         self.docker_ok = True
@@ -120,10 +122,15 @@ class FakeHost:
                          "state": "OPEN"}]
             return Result(0, json.dumps(rows))
         if argv[:3] == ["gh", "pr", "view"]:
-            state = self.pr_states.get(argv[3])
+            number = argv[3]
+            repo = argv[argv.index("-R") + 1] if "-R" in argv else None
+            if (number, repo) in self.pr_by_repo:
+                state = self.pr_by_repo[(number, repo)]
+            else:
+                state = self.pr_states.get(number)
             if state is None:
                 return Result(1, "", "no pull request")
-            return Result(0, json.dumps({"number": int(argv[3]), "title": f"OPS-347: x",
+            return Result(0, json.dumps({"number": int(number), "title": "OPS-347: x",
                                          "headRefName": "ops-347-x", "state": state}))
         if argv[:2] == ["docker", "ps"]:
             if not self.docker_ok:
@@ -486,6 +493,84 @@ class ReapTests(unittest.TestCase):
                 self.assertEqual(hx_reap.main(["--config", str(bad)], log=quiet_log()), 2)
         finally:
             sys.stderr = saved
+
+    def test_worktree_remove_never_passes_force(self):
+        _, plan = self.plan()
+        removes = [a for a in plan.actions if a.kind == "worktree"]
+        self.assertGreaterEqual(len(removes), 1)
+        for action in removes:
+            self.assertEqual(
+                action.argv,
+                ["git", "-C", action.argv[2], "worktree", "remove", action.target])
+            self.assertNotIn("--force", action.argv)
+
+    def test_dry_run_wins_over_close(self):
+        fake = FakeHost()
+        log = quiet_log()
+        code = hx_reap.main(["--close", "--dry-run", "--tmp-root", self.tmp],
+                            host=make_host(fake), log=log)
+        self.assertEqual(code, 0)
+        text = "\n".join(log.lines)
+        self.assertIn("reap report only", text)
+        self.assertNotIn("reap --close", text)
+        self.assertIn("would close", text)
+        self.assertNotIn("\ndo ", "\n" + text)
+        self.assertEqual(actions(fake), [])
+
+    def test_unreadable_worktree_status_is_skipped(self):
+        fake = FakeHost()
+        path = "/srv/wt/app-ops-347"
+        fake.fail.add(("git", "-C", path, "status", "--porcelain"))
+        _, plan = self.plan(fake)
+        removed = [a.target for a in plan.actions if a.kind == "worktree"]
+        self.assertNotIn(path, removed)
+        self.assertIn(("worktree", path, "git status failed"), plan.skipped)
+        self.assertIn("/srv/wt/app-ops-227", removed)
+
+    def test_mixed_ticket_worktree_is_kept(self):
+        fake = FakeHost()
+        mixed = "/srv/wt/mixed-ops-347-ops-400"
+        both = "/srv/wt/both-ops-347-ops-227"
+        self.assertEqual(cleanup.find_keys(mixed), {"OPS-347", "OPS-400"})
+        self.assertEqual(cleanup.find_keys(both), {"OPS-347", "OPS-227"})
+        fake.worktrees[CO].append((mixed, "feature", False))
+        fake.worktrees[CO].append((both, "also", False))
+        _, plan = self.plan(fake)
+        removed = [a.target for a in plan.actions if a.kind == "worktree"]
+        self.assertNotIn(mixed, removed)
+        self.assertIn(both, removed)
+
+    def test_mixed_ticket_container_is_kept(self):
+        fake = FakeHost()
+        mixed = "redis-ops-347-ops-400"
+        both = "redis-ops-347-ops-227"
+        self.assertEqual(cleanup.find_keys(mixed), {"OPS-347", "OPS-400"})
+        self.assertEqual(cleanup.find_keys(both), {"OPS-347", "OPS-227"})
+        fake.containers += [{"Names": mixed}, {"Names": both}]
+        _, plan = self.plan(fake)
+        stopped = [a.target for a in plan.actions if a.kind == "container"]
+        self.assertNotIn(mixed, stopped)
+        self.assertIn(both, stopped)
+        self.assertIn("redis-ops-347", stopped)
+
+    def test_scratch_container_stays_when_one_repo_pr_is_open(self):
+        fake = FakeHost()
+        fake.containers += [{"Names": "db1777"}, {"Names": "db1778"}]
+        fake.pr_by_repo = {
+            ("1777", "acme/app"): "MERGED",
+            ("1777", "acme/harness"): "OPEN",
+            ("1778", "acme/app"): "MERGED",
+            ("1778", "acme/harness"): "CLOSED",
+        }
+        _, plan = self.plan(fake)
+        stopped = [a.target for a in plan.actions if a.kind == "container"]
+        self.assertNotIn("db1777", stopped)
+        self.assertIn("db1778", stopped)
+        skipped = {t: r for k, t, r in plan.skipped if k == "container"}
+        self.assertIn("open", skipped["db1777"])
+        views = [c for c in fake.calls if c[:3] == ["gh", "pr", "view"] and c[3] == "1777"]
+        repos = sorted(c[c.index("-R") + 1] for c in views)
+        self.assertEqual(repos, ["acme/app", "acme/harness"])
 
 
 class HostReadTests(unittest.TestCase):
