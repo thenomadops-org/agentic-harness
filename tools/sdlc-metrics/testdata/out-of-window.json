@@ -1,0 +1,36 @@
+{
+  "_comment": [
+    "The SUBTLER vacuity fixture, and the one that matters more. The fetch",
+    "worked — there are pull requests and issues here — but every one of them",
+    "is closed and falls outside the window. Naive code computes a full",
+    "document of zeroes from this and calls it a quiet fortnight. It is not:",
+    "it is a window that selected nothing, which is what a wrong -now, a wrong",
+    "-window-days or a paginator that stopped early looks like."
+  ],
+  "repo": "fixture/out-of-window",
+  "collected_at": "2026-06-15T00:00:00Z",
+  "pull_requests": [
+    {
+      "number": 1,
+      "title": "long merged",
+      "author": "app",
+      "state": "MERGED",
+      "created_at": "2026-01-02T00:00:00Z",
+      "merged_at": "2026-01-02T06:00:00Z",
+      "closed_at": "2026-01-02T06:00:00Z",
+      "files": ["api/gateway/g.go"],
+      "changes": [{ "kind": "commit", "at": "2026-01-02T00:00:00Z", "sha": "aaa" }],
+      "reviews": [{ "author": "app", "state": "COMMENTED", "submitted_at": "2026-01-02T02:00:00Z" }]
+    }
+  ],
+  "issues": [
+    {
+      "number": 101,
+      "title": "long closed",
+      "state": "CLOSED",
+      "created_at": "2026-01-01T00:00:00Z",
+      "closed_at": "2026-01-03T00:00:00Z",
+      "labels": ["bug", "proj:infra"]
+    }
+  ]
+}

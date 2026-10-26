@@ -1,0 +1,12 @@
+{
+  "_comment": [
+    "The vacuity fixture: the shape a broken query produces. Well-formed,",
+    "parses cleanly, and contains nothing. Computing over it must be an ERROR",
+    "(ErrNoSubjects, exit 3), never a document of zeroes — a quiet week and a",
+    "broken query are indistinguishable from the output otherwise."
+  ],
+  "repo": "fixture/empty",
+  "collected_at": "2026-06-15T00:00:00Z",
+  "pull_requests": [],
+  "issues": []
+}

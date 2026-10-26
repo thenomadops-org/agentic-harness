@@ -1,0 +1,135 @@
+# from factory-seed@UNSTAMPED
+#
+# The seed's guards, plus the single aggregate status check that gates merges.
+#
+# ============================================================================
+# WHY THE AGGREGATE IS NOT A SCRIPT
+# ============================================================================
+#
+# Branch protection needs one context that is ALWAYS present and turns red if any
+# job failed. One project grew a 27 KB bash script to compute that, and most of it
+# was a reimplementation of two GitHub features: `needs:` and `if: always()`.
+# Ask what the platform already does before writing the wrapper — a script that
+# re-implements the platform is a second thing to get wrong, and it goes wrong
+# quietly.
+#
+# So the aggregate is the `summary` job below, and it is nine lines of logic.
+#
+# THE TRAP, and the reason for the `grep` rather than a bare `if: failure()`:
+# a `needs:` job that was SKIPPED does not fail. Path filters and `if:`
+# conditions make a job **absent** rather than red, and absent reads as fine to
+# every dashboard there is. That is the signature defect in this shop. So
+# `skipped` and `cancelled` are treated as failures here, and the job says which
+# it saw.
+#
+# WHAT THIS STILL CANNOT SEE, stated plainly rather than pretended away:
+# `needs:` refers only to jobs in THIS file, and a workflow that stopped being
+# triggered at all is in no graph — a deleted trigger, a typo'd `paths:` filter,
+# or a file that does not parse (GitHub answers an unparseable workflow by
+# failing the run instantly with ZERO jobs and the workflow's name replaced by
+# its own file path). Detecting that requires re-deriving, from the workflow
+# files themselves, which workflows should have run for this diff. That is a
+# genuine parse and it is Tier 1 seed material. Until you install it, this
+# aggregate answers "did everything I listed pass", NOT "did everything that
+# should have run, run". Do not mistake the first for the second.
+#
+# ============================================================================
+# WIRING (this file does nothing until you do this)
+# ============================================================================
+#
+# Branch protection on `main` requires exactly two contexts:
+#
+#   summary   — this file's aggregate
+#   dod       — dod-check.yml, which cannot be folded in here because it must
+#               trigger on `pull_request: types: [edited]` and this workflow
+#               must not re-run every gate each time somebody fixes a typo in a
+#               description
+#
+# Every new gating job goes in this file and in `needs:` below. A job missing
+# from `needs:` is a job whose failure does not block a merge.
+#
+# `__RUNNER__` is a placeholder the install step replaces. If it survives, this
+# workflow cannot schedule AND runner-pinning-check goes red on it, because
+# `__RUNNER__` is not in .factory/allowed-runners. That is deliberate: an install
+# step that can be skipped silently will be skipped.
+name: ci-summary
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  # Plain `true` would cancel a push-to-main run, and a cancelled publish leaves
+  # the previous artefact in place while reporting nothing wrong. Cancel PR runs
+  # only.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  # The seed's own guards and their regression suites, with NO path filter: a
+  # change to a guard is not a change to the thing it guards, so a path-filtered
+  # gate skips exactly the commit that breaks it.
+  #
+  # Step order matters. The harness is verified FIRST, because every suite below
+  # reports through it — if the scoreboard cannot report a failure, every later
+  # green in this job is meaningless. Not hypothetical: a suite once printed
+  # `passed=1 failed=0` while running twelve cases, because its cases ran in a
+  # pipeline subshell and the counters were incremented in a copy and discarded.
+  gates:
+    runs-on: __RUNNER__
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: the test harness can report a failure
+        run: bash scripts/gate-test-lib.test.sh
+
+      - name: runner pinning — regressions
+        run: bash scripts/runner-pinning-check.test.sh
+
+      - name: runner pinning — this repo
+        run: bash scripts/runner-pinning-check.sh
+
+      - name: vendored provenance — regressions
+        run: bash scripts/factory-provenance-check.test.sh
+
+      - name: vendored provenance — this repo
+        run: bash scripts/factory-provenance-check.sh
+
+      # The pre-action hooks. Their suites are MUST-BLOCK cases: every shape a
+      # hook must refuse asserts exit 2, every shape it must leave alone asserts
+      # exit 0. A hook whose suite nobody runs has been green since the day
+      # somebody broke it.
+      - name: pre-action hooks — regressions
+        run: bash .claude/hooks/test-all.sh
+
+      # Evals over the agent configuration itself — CLAUDE.md and .claude/**.
+      # These are the only files every agent reads before it reads any code, and
+      # they are the last thing in most repos to have a test over them. The
+      # runner refuses a vacuous run (zero tasks, zero subjects, or a check it
+      # could not make fail) with a distinct exit code, so a suite that stopped
+      # examining anything goes red rather than quiet.
+      - name: agent-config evals — live checks and break-proofs
+        run: bash evals/run.sh
+
+  summary:
+    needs: [gates]
+    if: always()
+    runs-on: __RUNNER__
+    steps:
+      - name: every required job succeeded
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+        run: |
+          set -euo pipefail
+          printf '%s\n' "$RESULTS"
+          if printf '%s' "$RESULTS" | grep -qE '"result"[[:space:]]*:[[:space:]]*"(failure|cancelled|skipped)"'; then
+            echo "::error::a required job did not succeed — see the JSON above." >&2
+            echo "          'skipped' counts: a path filter or an if: condition made a gate" >&2
+            echo "          absent rather than red, and absent is not green." >&2
+            exit 1
+          fi
+          echo "ci-summary PASSED — every job in needs: reported success."

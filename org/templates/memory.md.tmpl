@@ -1,0 +1,45 @@
+---
+title: "{{name}} — Memory"
+tags: [vault, domain/team, type/index]
+type: index
+domain: team
+repo: (cross-repo)
+status: active
+color: purple
+created: {{today}}
+---
+
+Soul: [[{{name}}-Soul]] · Role: [[{{name}}-Role]] · Org: [[Team-ORG]]
+
+My memory index. One line per fact, newest at the bottom. This file is what I
+read at the start of a task, so it has to stay short enough to read — the hook
+is a pointer, never the content.
+
+## How I write memory
+
+One file per fact, in this folder, named for the lesson rather than the incident:
+`{{name}}-mem-<short-kebab-slug>.md`. Vault frontmatter, `type: memory`,
+`color: purple`. Body carries the fact, then **Why:** (what it cost to learn) and
+**How to apply:** (what to do differently). Link related atoms with `[[wikilinks]]`.
+
+**Scope matters, and getting it wrong is the common failure.** This folder is for
+lessons about *how I work* — they travel with me across every client. A fact about
+a specific cluster, board or product belongs in that client's memory namespace at
+`{{vault_path}}/.claude/memory/<client>/`, not here. Writing a client fact into a
+shared space pollutes every other engagement; writing a general lesson into one
+client's namespace means I learn it again on the next.
+
+**What is worth saving:** something that cost me a mistake, a correction from my
+chain, or a constraint that is not derivable from the code. **What is not:**
+anything the repo already records, and anything that only mattered to one
+conversation.
+
+**Before adding:** check whether an existing atom covers it and update that
+instead. Duplicates that drift apart are worse than a single stale note.
+
+## Index
+
+<!-- - [Short title](file.md) — the hook, in one line. -->
+
+*Empty. I have not learned anything durable yet — that is expected on day one and
+a problem by week four.*

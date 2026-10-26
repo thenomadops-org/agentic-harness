@@ -1,0 +1,431 @@
+name: gate
+
+# Runs on everything. The boundary check in particular has to be automatic:
+# this repo is written to be publishable, and the leak path is a *useful*
+# commit — the skills and memory atoms worth shipping are full of the incidents
+# that made them worth writing.
+on:
+  # Story branches open a PR, so `push` on every branch plus `pull_request`
+  # ran this gate twice for the same commit. Push is limited to main; a branch
+  # is gated through its PR.
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# Every job runs on a GitHub-hosted runner (ubuntu-latest). This repository is
+# public, so a pull request from anyone runs this workflow: it must never be
+# scheduled onto a machine the org hosts itself. A fork that wants its own
+# runner changes `runs-on` on purpose, in a private repository.
+
+permissions:
+  contents: read
+
+# One run per ref: a new push cancels the superseded run instead of queueing it
+# behind the old one.
+concurrency:
+  group: gate-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# Every scratch path is under ${RUNNER_TEMP}, which the runner clears per job.
+# That keeps the jobs safe on a runner that persists between runs as well.
+
+# The workflow uses the Python already on the hosted image instead of a
+# setup-* action, and each job checks the version it needs.
+
+# Stdlib only, everywhere. That constraint is the product's, not CI's: a clean
+# machine has an externally-managed Python, so anything needing `pip install`
+# would work here and fail for a user. Testing under the same constraint is the
+# only way that stays true.
+jobs:
+  boundary:
+    name: nothing private is publishable
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: python version
+        run: python3 -c 'import sys; assert sys.version_info >= (3, 11), sys.version; print(sys.version)'
+      - name: check_public
+        run: python3 tools/check_public.py
+
+      - name: prove the gate can still fail
+        run: |
+          # A gate nobody has tried to break is a gate with an unknown pass
+          # rate. This planted one of each class and caught a dead pattern the
+          # first time it ran: `\b` in double-quoted YAML is an escape, so the
+          # private-IP rule reached the regex engine as literal backslash-b and
+          # matched nothing.
+          set -e
+          # The probe strings are BUILT here rather than written literally.
+          # A workflow that tests a secret-scanner by embedding real-looking
+          # secrets fails that scanner — which is exactly what happened the
+          # first time this was written, and is the gate working correctly.
+          K=IOSFODNN7EXAMPLE
+          U=someuser
+          O=2
+          {
+            printf 'AKIA%s\n' "$K"
+            printf '192.168.%s.181\n' "$O"
+            printf '/home/%s/notes\n' "$U"
+          } > docs/_gate_probe.md
+
+          if python3 tools/check_public.py > /dev/null 2>&1; then
+            echo "::error::check_public passed a file containing a fake AWS key,"
+            echo "::error::a private IP and a home path. The gate is not working."
+            rm -f docs/_gate_probe.md
+            exit 1
+          fi
+          rm -f docs/_gate_probe.md
+          echo "gate refused the probe, as it must"
+
+  parsers:
+    name: parsers refuse what they claim to
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: python version
+        run: python3 -c 'import sys; assert sys.version_info >= (3, 11), sys.version; print(sys.version)'
+      - run: python3 tools/test_miniyaml.py
+
+      - name: no third-party imports
+        run: |
+          # The stdlib-only promise, enforced. Importing pyyaml here would work
+          # and break on a user's machine, which is the worst possible place to
+          # find out.
+          python3 - <<'PY'
+          import ast, pathlib, sys
+          stdlib = set(sys.stdlib_module_names)
+          local = {p.stem for p in pathlib.Path("tools").glob("*.py")}
+          bad = []
+          for path in pathlib.Path(".").rglob("*.py"):
+              if ".git" in path.parts:
+                  continue
+              tree = ast.parse(path.read_text(), str(path))
+              for node in ast.walk(tree):
+                  names = []
+                  if isinstance(node, ast.Import):
+                      names = [a.name.split(".")[0] for a in node.names]
+                  elif isinstance(node, ast.ImportFrom) and node.level == 0:
+                      names = [(node.module or "").split(".")[0]]
+                  for name in names:
+                      if name and name not in stdlib and name not in local:
+                          bad.append(f"{path}:{node.lineno}: {name}")
+          if bad:
+              print("third-party imports found:")
+              print("\n".join(f"  {b}" for b in bad))
+              raise SystemExit(1)
+          print("stdlib only — confirmed")
+          PY
+
+  render:
+    name: an org actually generates
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: python version
+        run: python3 -c 'import sys; assert sys.version_info >= (3, 11), sys.version; print(sys.version)'
+
+      - name: render two orgs and prove role ids are stable
+        run: |
+          set -e
+          mkdir -p ${RUNNER_TEMP}/v1 ${RUNNER_TEMP}/v2
+          cp -r vault-seed/. ${RUNNER_TEMP}/v1/
+          cp -r vault-seed/. ${RUNNER_TEMP}/v2/
+          python3 tools/render.py --principal Alex --theme default \
+            --packs core,engineering,product,operations,process,gtm,legal \
+            --vault ${RUNNER_TEMP}/v1 --out ${RUNNER_TEMP}/v1 --today 2026-01-01 > /dev/null
+          python3 tools/render.py --principal Sam --theme greek \
+            --packs core,engineering --posture frugal \
+            --vault ${RUNNER_TEMP}/v2 --out ${RUNNER_TEMP}/v2 --today 2026-01-01 > /dev/null
+
+          # The architectural claim: names are cosmetic, role ids are the key.
+          # Find the file holding chief-of-staff in each org. Exactly one, and
+          # the two must have DIFFERENT names but the SAME role id.
+          a=$(grep -rl 'role id is' ${RUNNER_TEMP}/v1/.claude/agents/ | xargs grep -l '`chief-of-staff`')
+          b=$(grep -rl 'role id is' ${RUNNER_TEMP}/v2/.claude/agents/ | xargs grep -l '`chief-of-staff`')
+          test "$(echo "$a" | wc -l)" = "1" || { echo "::error::v1: chief-of-staff in $(echo "$a" | wc -l) files"; exit 1; }
+          test "$(echo "$b" | wc -l)" = "1" || { echo "::error::v2: chief-of-staff in $(echo "$b" | wc -l) files"; exit 1; }
+          an=$(basename "$a"); bn=$(basename "$b")
+          echo "chief-of-staff is $an in org 1, $bn in org 2"
+          test "$an" != "$bn" \
+            || { echo "::error::both themes produced $an — naming is not cosmetic"; exit 1; }
+          echo "role id stable across themes, names differ"
+
+      - name: no unrendered template tokens
+        run: |
+          # Scan the RENDERED zones only. Templates/ holds placeholder tokens by
+          # design — that is what makes it a template. This step failed on its
+          # first run for exactly that reason, which is the second time
+          # token-bearing templates have tripped a checker written to find
+          # token leakage. If a third checker walks the vault, exclude
+          # Templates/ before running it.
+          leak=0
+          for org in ${RUNNER_TEMP}/v1 ${RUNNER_TEMP}/v2; do
+            if grep -rn '{{' "$org/.claude/agents" "$org/Team" --include='*.md' \
+                 | grep -v '<!--'; then
+              leak=1
+            fi
+          done
+          if [ "$leak" = "1" ]; then
+            echo "::error::template tokens leaked into rendered output"
+            exit 1
+          fi
+          echo "no leakage in rendered output"
+
+      - name: a failed render writes nothing
+        run: |
+          rm -rf ${RUNNER_TEMP}/should-not-exist
+          python3 tools/render.py --principal P --vault ${RUNNER_TEMP}/v1 \
+            --out ${RUNNER_TEMP}/should-not-exist --names Claude,Bill,John --packs core \
+            > /dev/null 2>&1 && { echo "::error::reserved name accepted"; exit 1; }
+          test ! -e ${RUNNER_TEMP}/should-not-exist \
+            || { echo "::error::a failed render left files behind"; exit 1; }
+          echo "validation precedes writes, as designed"
+
+  vault:
+    name: the vault lint can fail
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: python version
+        run: python3 -c 'import sys; assert sys.version_info >= (3, 11), sys.version; print(sys.version)'
+
+      - name: a fresh vault lints clean
+        run: |
+          set -e
+          mkdir -p ${RUNNER_TEMP}/vault
+          cp -r vault-seed/. ${RUNNER_TEMP}/vault/
+          python3 tools/render.py --principal Alex --theme default \
+            --packs core,engineering --vault ${RUNNER_TEMP}/vault --out ${RUNNER_TEMP}/vault \
+            --today 2026-01-01 > /dev/null
+          cd ${RUNNER_TEMP}/vault && python3 lint_vault.py
+
+      - name: tampering with a generated file fails the lint
+        run: |
+          cd ${RUNNER_TEMP}/vault
+          echo "" >> Team/Bill-Engineering/Bill-Role.md
+          if python3 lint_vault.py > /dev/null 2>&1; then
+            echo "::error::lint accepted a hand-edited generated file"
+            exit 1
+          fi
+          echo "tamper detected, as it must be"
+
+      - name: a journal without metrics fails the lint
+        run: |
+          set -e
+          # Fresh vault: the previous step deliberately left a tampered file,
+          # and ${RUNNER_TEMP}/vault is not a git checkout so there is nothing to revert.
+          rm -rf ${RUNNER_TEMP}/vault2 && mkdir -p ${RUNNER_TEMP}/vault2
+          cp -r vault-seed/. ${RUNNER_TEMP}/vault2/
+          python3 tools/render.py --principal Alex --theme default \
+            --packs core,engineering --vault ${RUNNER_TEMP}/vault2 --out ${RUNNER_TEMP}/vault2 \
+            --today 2026-01-01 > /dev/null
+          cd ${RUNNER_TEMP}/vault2
+          printf -- '---\ntitle: "x"\ntype: journal\nagent: bill\ndate: 2026-01-01\n---\n' \
+            > Sessions/Bill_Engineering_2026-01-01.md
+          if python3 lint_vault.py > /dev/null 2>&1; then
+            echo "::error::lint accepted a journal with no PRs or token counts"
+            exit 1
+          fi
+          echo "missing metrics detected, as it must be"
+
+  skills:
+    name: the ported skills still work
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: the vendored gate tests pass
+        run: |
+          # These came across from a working org and were scrubbed of its
+          # names. The scrub broke eight of them the first time: the fixture
+          # ticket key changed to PROJ-999 while the fixture's configured
+          # prefixes stayed SS/SIDE, so the checker correctly rejected bodies
+          # the suite expected it to accept.
+          #
+          # The boundary gate said CLEAN throughout. It checks for leaks, not
+          # for correctness — which is exactly why this job exists.
+          set -e
+          cd .claude/skills/new-project/seed/tier0
+          fail=0
+          for t in scripts/*.test.sh; do
+            echo "--- $t"
+            bash "$t" || fail=1
+          done
+          exit $fail
+
+      - name: every skill has usable frontmatter
+        run: |
+          python3 - <<'PY'
+          import pathlib, sys
+          bad = []
+          # Repo-local skills stay in .claude/skills; the workforce skills
+          # moved to plugin/skills (AOS-283, spec F1). Both must be loadable,
+          # and neither tree may be empty: no skills examined is a failure.
+          dirs = [pathlib.Path(".claude/skills"), pathlib.Path("plugin/skills")]
+          skills = []
+          for d in dirs:
+              found = [s for s in sorted(d.iterdir()) if s.is_dir()] if d.is_dir() else []
+              if not found:
+                  bad.append(f"{d}: no skills found")
+              skills += found
+          for skill in skills:
+              f = skill / "SKILL.md"
+              if not f.exists():
+                  bad.append(f"{skill.name}: no SKILL.md"); continue
+              head = f.read_text(encoding="utf-8")[:800]
+              if not head.startswith("---"):
+                  bad.append(f"{skill.name}: no frontmatter")
+              elif "\nname:" not in head or "\ndescription:" not in head:
+                  bad.append(f"{skill.name}: frontmatter needs name and description")
+          if bad:
+              print("\n".join(f"  {b}" for b in bad)); sys.exit(1)
+          print("every skill is loadable")
+          PY
+
+      - name: the plugin is well formed
+        run: python3 plugin/check_plugin.py .
+
+      - name: every plugin test directory runs, and none can go missing
+        run: |
+          # Discovery, not a list. A hand-kept list of directories is how new
+          # skills' tests went unrun: each new directory had to be added here
+          # and was missed. Every directory under plugin/ holding a test_*.py
+          # runs as its own unittest invocation, and any failure fails the step.
+          #
+          # The floor is the vacuity guard: a discovery that finds nothing (or
+          # less than was there) passes every loop trivially. Raise it when a
+          # test directory is added; lowering it is a deliberate act in review.
+          # OPS-333 removed plugin/hooks/merge-gate and
+          # plugin/skills/start-ready-work, so the floor dropped from 11 to 9.
+          floor=9
+          dirs=$(find plugin -name 'test_*.py' -not -path '*/__pycache__/*' -exec dirname {} \; | sort -u)
+          count=$(printf '%s\n' "$dirs" | grep -c .)
+          echo "found $count plugin test directories (floor $floor)"
+          if [ "$count" -lt "$floor" ]; then
+            echo "::error::found $count plugin test directories, expected at least $floor; tests were deleted or discovery is broken"
+            exit 1
+          fi
+          fail=0
+          for d in $dirs; do
+            echo "--- $d"
+            python3 -m unittest discover -s "$d" || { echo "::error::unittest failed in $d"; fail=1; }
+          done
+          exit $fail
+
+      - name: the project file and memory format validate, and the validator can fail
+        run: |
+          set -e
+          python3 plugin/skills/onboard-project/validate.py .agentic-os.yaml
+          python3 plugin/skills/onboard-project/validate.py memory docs/memory
+
+  journey:
+    name: a new user gets a working org
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: python version
+        run: python3 -c 'import sys; assert sys.version_info >= (3, 11), sys.version; print(sys.version)'
+
+      - name: setup, install, lint — the whole path
+        run: |
+          set -e
+          export CLAUDE_HOME=${RUNNER_TEMP}/home
+          mkdir -p "$CLAUDE_HOME"
+
+          python3 tools/setup.py --vault ${RUNNER_TEMP}/uservault --principal Dana \
+            --packs core,engineering --theme norse --posture frugal \
+            --tracker github-issues --tracker-project acme/widgets \
+            --today 2026-01-01
+
+          cd ${RUNNER_TEMP}/uservault
+          python3 .claude/skills/install-org/install.py --home "$CLAUDE_HOME"
+          python3 lint_vault.py
+
+          # The org is useless without the discipline that came with it.
+          for s in write-a-gate deploy-and-prove prove-recovery merge-pr \
+                   new-project learn-repo session-reflection install-org; do
+            test -f "$CLAUDE_HOME/.claude/skills/$s/SKILL.md" \
+              || { echo "::error::$s did not reach the user"; exit 1; }
+          done
+          test -f .claude/org.config.json
+          echo "8 skills and 7 agents installed, vault lints clean"
+
+      - name: setup refuses to build a second org
+        run: |
+          if python3 tools/setup.py --vault ${RUNNER_TEMP}/uservault --principal Other \
+               --packs core > /dev/null 2>&1; then
+            echo "::error::setup created a second org over an existing one"
+            exit 1
+          fi
+          echo "one fork, one org — enforced"
+
+  update:
+    name: an update preserves what people wrote
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: python version
+        run: python3 -c 'import sys; assert sys.version_info >= (3, 11), sys.version; print(sys.version)'
+
+      - name: a Soul survives an update, a Role does not
+        run: |
+          set -e
+          export CLAUDE_HOME=${RUNNER_TEMP}/uh && mkdir -p "$CLAUDE_HOME"
+          python3 tools/setup.py --vault ${RUNNER_TEMP}/uv --principal Dana \
+            --packs core --theme greek --tracker github-issues \
+            --tracker-project acme/w --today 2026-01-01 > /dev/null
+
+          SOUL=${RUNNER_TEMP}/uv/Team/Athena-EA/Athena-Soul.md
+          ROLE=${RUNNER_TEMP}/uv/Team/Athena-EA/Athena-Role.md
+          printf '\nRewritten by a human.\n' >> "$SOUL"
+          printf '\nHAND EDITED\n' >> "$ROLE"
+
+          python3 tools/update.py --vault ${RUNNER_TEMP}/uv --today 2026-01-01 > /dev/null
+
+          # The whole reason update exists rather than re-running setup.
+          grep -q "Rewritten by a human" "$SOUL" \
+            || { echo "::error::update destroyed an authored Soul"; exit 1; }
+          grep -q "HAND EDITED" "$ROLE" \
+            && { echo "::error::update left a hand-edit in a generated file"; exit 1; }
+
+          test -f ${RUNNER_TEMP}/uv/.claude/adapter/ADAPTER.md \
+            || { echo "::error::tracker adapter did not reach the vault"; exit 1; }
+          test "$(ls ${RUNNER_TEMP}/uv/.claude/memory/_shared/*.md | wc -l)" -ge 8 \
+            || { echo "::error::seed memory did not reach the vault"; exit 1; }
+
+          cd ${RUNNER_TEMP}/uv
+          python3 .claude/skills/install-org/install.py --home "$CLAUDE_HOME" > /dev/null
+          python3 lint_vault.py
+          echo "Soul preserved, Role regenerated, adapter and seed memory present"
+
+      - name: a removed role is reported, never deleted
+        run: |
+          set -e
+          rm -rf ${RUNNER_TEMP}/ov
+          python3 tools/setup.py --vault ${RUNNER_TEMP}/ov --principal Dana \
+            --packs core,engineering --theme greek --tracker none \
+            --today 2026-01-01 > /dev/null
+          before=$(ls ${RUNNER_TEMP}/ov/Team | wc -l)
+          python3 - <<PY2
+          import json, pathlib
+          p = pathlib.Path("${RUNNER_TEMP}/ov/.claude/org.config.json")
+          c = json.loads(p.read_text()); c['packs'] = ['core']
+          p.write_text(json.dumps(c, indent=2, sort_keys=True) + "\n")
+          PY2
+          python3 tools/update.py --vault ${RUNNER_TEMP}/ov --today 2026-01-01 | tee ${RUNNER_TEMP}/out.txt
+          grep -q "orphaned Team directories" ${RUNNER_TEMP}/out.txt \
+            || { echo "::error::shrinking the org reported no orphans"; exit 1; }
+          after=$(ls ${RUNNER_TEMP}/ov/Team | wc -l)
+          test "$before" = "$after" \
+            || { echo "::error::update deleted $((before-after)) Team directories"; exit 1; }
+          echo "orphans reported, nothing deleted"
+
+      - name: update refuses a vault with no org
+        run: |
+          rm -rf ${RUNNER_TEMP}/empty && mkdir -p ${RUNNER_TEMP}/empty
+          if python3 tools/update.py --vault ${RUNNER_TEMP}/empty > /dev/null 2>&1; then
+            echo "::error::update ran against a vault with no org"
+            exit 1
+          fi
+          echo "refused, as it must"

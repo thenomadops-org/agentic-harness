@@ -1,0 +1,9 @@
+{
+  "name": "agentic-os",
+  "version": "0.1.0",
+  "description": "The Agentic-OS workforce: role agents, lifecycle skills, hard-law hooks and org lessons.",
+  "license": "MIT",
+  "author": {
+    "name": "Agentic-OS"
+  }
+}

@@ -1,0 +1,9 @@
+
+# Python bytecode under plugin/
+plugin/**/__pycache__/
+
+# Bytecode anywhere, including tools/.
+__pycache__/
+
+# An org's own boundary names (see .public-boundary.yaml). Never published.
+.public-boundary.local.yaml

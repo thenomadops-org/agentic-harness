@@ -1,0 +1,73 @@
+# What must never appear in this repository.
+#
+# Agentic-OS is the template other people fork. The vault it generates is
+# private forever; this repo may not be. Everything here is written on the
+# assumption that it becomes public, and `tools/check_public.py` enforces that
+# assumption rather than trusting it.
+#
+# A fork should replace `deny` with its own names and keep `always_deny`.
+
+version: 1
+
+# Names from the org this was extracted from. They are NOT listed here: a
+# public deny list naming the source org publishes exactly what it forbids.
+# Put an org's own names in `.public-boundary.local.yaml` (git-ignored, same
+# format, merged by tools/check_public.py) or point PUBLIC_BOUNDARY_EXTRA at
+# a file kept outside the repository.
+deny:
+  - "tower[0-9]+"   # numbered host names are an inventory of someone's machines
+
+# Never acceptable, in any fork, regardless of the deny list above.
+always_deny:
+  # Private network addresses.
+  # SINGLE-quoted deliberately. In double quotes a backslash is an escape, so
+  # `\\b` reaches the regex engine as a literal backslash-b and matches nothing —
+  # the pattern is present, looks right, and silently never fires. Found by
+  # planting an address and watching it sail through.
+  - '\b192\.168\.[0-9]{1,3}\.[0-9]{1,3}\b'
+  - '\b10\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\b'
+  - '\b172\.(1[6-9]|2[0-9]|3[01])\.[0-9]{1,3}\.[0-9]{1,3}\b'
+  - '\b127\.0\.0\.1\b'
+  - '\blocalhost:[0-9]{2,5}\b' 
+  # Tailscale CGNAT addresses (100.64.0.0/10) and real tailnet names.
+  - '\b100\.(6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])\.[0-9]{1,3}\.[0-9]{1,3}\b'
+  - '\btail[0-9a-f]{6}\.ts\.net\b'
+  # Agent session links carry a private conversation id.
+  - 'claude\.ai/code/session'
+  # Personal mailboxes.
+  - '[A-Za-z0-9._%+-]+@(gmail|icloud|me|mac)\.com\b'
+  # Slack bot/user/app tokens and webhook URLs.
+  - 'hooks\.slack\.com/services/'
+  # Real home directories — a path is a username
+  - "/home/[a-z][a-z0-9_-]{2,}/"
+  - "/Users/[a-z][a-z0-9_-]{2,}/"
+  # Credentials
+  - "AKIA[0-9A-Z]{16}"
+  - "ghp_[A-Za-z0-9]{20,}"
+  - "github_pat_[A-Za-z0-9_]{20,}"
+  - "gh[opsu]_[A-Za-z0-9]{20,}"
+  - "xox[baprs]-[A-Za-z0-9-]{10,}"
+  - "sk-[A-Za-z0-9]{20,}"
+  - "-----BEGIN [A-Z ]*PRIVATE KEY-----"
+  - "eyJhbGciOi[A-Za-z0-9_.-]{20,}"      # a JWT
+  # Cloud object stores, which name a project
+  - "gs://[a-z0-9][a-z0-9._-]+"
+  - "s3://[a-z0-9][a-z0-9.-]+"
+
+# Exceptions, matched as substrings against the WHOLE offending line. Keep this
+# list short — every entry is a hole, and a long allow list means the deny list
+# is wrong.
+allow:
+  # This repo's own coordinates.
+  - "thenomadops-org/agentic-harness"
+  - "ghcr.io/thenomadops-org/agent-osd"  # published image coordinate
+  # The boundary file naming what it forbids, and the gate that reads it.
+  - ".public-boundary.yaml"
+  - "check_public.py"
+
+# Not scanned: binary files, .git, and the tooling caches.
+skip_dirs:
+  - .git
+  - __pycache__
+  - .venv
+  - node_modules

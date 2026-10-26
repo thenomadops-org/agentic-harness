@@ -1,0 +1,14 @@
+{
+  "name": "agentic-os",
+  "owner": {
+    "name": "Agentic-OS"
+  },
+  "plugins": [
+    {
+      "name": "agentic-os",
+      "source": "./plugin",
+      "description": "The Agentic-OS workforce: role agents, lifecycle skills, hard-law hooks and org lessons."
+    }
+  ],
+  "description": "Marketplace for the Agentic-OS workforce plugin."
+}

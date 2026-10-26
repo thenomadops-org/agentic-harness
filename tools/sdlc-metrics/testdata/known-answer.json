@@ -1,0 +1,199 @@
+{
+  "_comment": [
+    "A hand-built dataset with a KNOWN answer for every metric. compute_test.go",
+    "asserts each of those answers by hand-computed constant, so a change to a",
+    "computation shows up as a specific wrong number and not as a diff.",
+    "",
+    "Measured with -now 2026-06-15T00:00:00Z and -window-days 14, so the window",
+    "is 2026-06-01..2026-06-15. Everything below is dated relative to that.",
+    "",
+    "It is also the worked example of the input format: this is exactly what",
+    "--dump-dataset writes and what --input reads."
+  ],
+  "repo": "fixture/repo",
+  "collected_at": "2026-06-15T00:00:00Z",
+  "pull_requests": [
+    {
+      "_comment": "PR1 — merged on the FIRST implementation pass: a review, then nothing.",
+      "number": 1,
+      "title": "first pass",
+      "author": "app",
+      "state": "MERGED",
+      "created_at": "2026-06-02T00:00:00Z",
+      "merged_at": "2026-06-02T06:00:00Z",
+      "closed_at": "2026-06-02T06:00:00Z",
+      "files": ["api/gateway/internal/policy/policy.go", "docs/x.md"],
+      "changes": [{ "kind": "commit", "at": "2026-06-02T00:00:00Z", "sha": "aaa" }],
+      "reviews": [{ "author": "app", "state": "COMMENTED", "submitted_at": "2026-06-02T02:00:00Z" }]
+    },
+    {
+      "_comment": "PR2 — one rework cycle, and a CHANGES_REQUESTED review.",
+      "number": 2,
+      "title": "one round trip",
+      "author": "app",
+      "state": "MERGED",
+      "created_at": "2026-06-04T00:00:00Z",
+      "merged_at": "2026-06-04T10:00:00Z",
+      "closed_at": "2026-06-04T10:00:00Z",
+      "files": ["api/billing/x.go"],
+      "changes": [
+        { "kind": "commit", "at": "2026-06-04T00:00:00Z", "sha": "b1" },
+        { "kind": "commit", "at": "2026-06-04T05:00:00Z", "sha": "b2" }
+      ],
+      "reviews": [{ "author": "app", "state": "CHANGES_REQUESTED", "submitted_at": "2026-06-04T04:00:00Z" }]
+    },
+    {
+      "_comment": "PR3 — two rework cycles, the second answered by a FORCE PUSH rather than a new commit.",
+      "number": 3,
+      "title": "two round trips",
+      "author": "app",
+      "state": "MERGED",
+      "created_at": "2026-06-06T00:00:00Z",
+      "merged_at": "2026-06-06T12:00:00Z",
+      "closed_at": "2026-06-06T12:00:00Z",
+      "files": ["mobile/iosApp/A.swift", "mobile/shared/B.kt"],
+      "changes": [
+        { "kind": "commit", "at": "2026-06-06T00:00:00Z", "sha": "c1" },
+        { "kind": "force_push", "at": "2026-06-06T03:00:00Z" },
+        { "kind": "commit", "at": "2026-06-06T07:00:00Z", "sha": "c2" }
+      ],
+      "reviews": [
+        { "author": "app", "state": "COMMENTED", "submitted_at": "2026-06-06T02:00:00Z" },
+        { "author": "app", "state": "COMMENTED", "submitted_at": "2026-06-06T06:00:00Z" }
+      ]
+    },
+    {
+      "_comment": "PR4 — merged with NO review at all. Excluded from the first-pass rate; never counted as a first pass.",
+      "number": 4,
+      "title": "unreviewed",
+      "author": "app",
+      "state": "MERGED",
+      "created_at": "2026-06-08T00:00:00Z",
+      "merged_at": "2026-06-08T01:00:00Z",
+      "closed_at": "2026-06-08T01:00:00Z",
+      "files": ["scripts/foo.sh"],
+      "changes": [{ "kind": "commit", "at": "2026-06-08T00:00:00Z", "sha": "d1" }]
+    },
+    {
+      "_comment": "PR5 — open, non-draft, nothing has reviewed it since its last change. 48h waiting at -now.",
+      "number": 5,
+      "title": "waiting",
+      "author": "app",
+      "state": "OPEN",
+      "created_at": "2026-06-13T00:00:00Z",
+      "files": [".github/workflows/x.yml", "Makefile"],
+      "changes": [{ "kind": "commit", "at": "2026-06-13T00:00:00Z", "sha": "e1" }]
+    },
+    {
+      "_comment": "PR6 — open DRAFT. Ages, but is not waiting on anybody.",
+      "number": 6,
+      "title": "draft",
+      "author": "app",
+      "state": "OPEN",
+      "draft": true,
+      "created_at": "2026-06-14T00:00:00Z",
+      "files": ["api/media/z.go"],
+      "changes": [{ "kind": "commit", "at": "2026-06-14T00:00:00Z", "sha": "f1" }]
+    },
+    {
+      "_comment": "PR7 — open, and its most recent change has already been reviewed. Ages, contributes NOTHING to the awaiting-review median (not a zero).",
+      "number": 7,
+      "title": "reviewed and current",
+      "author": "app",
+      "state": "OPEN",
+      "created_at": "2026-06-10T00:00:00Z",
+      "files": ["admin/a.go"],
+      "changes": [{ "kind": "commit", "at": "2026-06-10T00:00:00Z", "sha": "g1" }],
+      "reviews": [{ "author": "app", "state": "COMMENTED", "submitted_at": "2026-06-11T00:00:00Z" }]
+    },
+    {
+      "_comment": "PR8 — review happens in THREADS, not whole reviews. T1 resolved with a later commit; T2 resolved with none after it; T3 never resolved.",
+      "number": 8,
+      "title": "threaded review",
+      "author": "app",
+      "state": "MERGED",
+      "created_at": "2026-06-05T00:00:00Z",
+      "merged_at": "2026-06-05T12:00:00Z",
+      "closed_at": "2026-06-05T12:00:00Z",
+      "files": ["api/social/s.go"],
+      "changes": [
+        { "kind": "commit", "at": "2026-06-05T00:00:00Z", "sha": "h1" },
+        { "kind": "commit", "at": "2026-06-05T09:00:00Z", "sha": "h2" }
+      ],
+      "threads": [
+        {
+          "id": "T1",
+          "resolved": true,
+          "resolved_by": "app",
+          "comments": [{ "author": "app", "created_at": "2026-06-05T02:00:00Z" }]
+        },
+        {
+          "id": "T2",
+          "resolved": true,
+          "resolved_by": "app",
+          "comments": [{ "author": "app", "created_at": "2026-06-05T10:00:00Z" }]
+        },
+        {
+          "id": "T3",
+          "resolved": false,
+          "comments": [{ "author": "app", "created_at": "2026-06-05T11:00:00Z" }]
+        }
+      ]
+    }
+  ],
+  "issues": [
+    {
+      "_comment": "I1 — open since long before the window, no pull request. 45 days old at -now, so aged.",
+      "number": 101,
+      "title": "old and unstarted",
+      "state": "OPEN",
+      "created_at": "2026-05-01T00:00:00Z",
+      "labels": ["proj:infra"]
+    },
+    {
+      "number": 102,
+      "title": "recent and unstarted",
+      "state": "OPEN",
+      "created_at": "2026-06-10T00:00:00Z"
+    },
+    {
+      "_comment": "I3 — open, but a pull request exists, so it is NOT counted as unstarted. PR3 came 24h after it.",
+      "number": 103,
+      "title": "started",
+      "state": "OPEN",
+      "created_at": "2026-06-05T00:00:00Z",
+      "linked_prs": [
+        { "number": 3, "state": "MERGED", "at": "2026-06-06T01:00:00Z", "created_at": "2026-06-06T00:00:00Z" }
+      ]
+    },
+    {
+      "_comment": "I4 — a labelled defect, closed. PR1 came 12h after it. Class proj:media.",
+      "number": 104,
+      "title": "defect one",
+      "state": "CLOSED",
+      "created_at": "2026-06-02T00:00:00Z",
+      "closed_at": "2026-06-03T00:00:00Z",
+      "labels": ["bug", "proj:media"],
+      "linked_prs": [
+        { "number": 1, "state": "MERGED", "at": "2026-06-02T13:00:00Z", "created_at": "2026-06-02T12:00:00Z" }
+      ]
+    },
+    {
+      "_comment": "I5 — a second defect in the SAME class as I4. Together they are one repeat class.",
+      "number": 105,
+      "title": "defect two, same class",
+      "state": "OPEN",
+      "created_at": "2026-06-12T00:00:00Z",
+      "labels": ["bug", "proj:media"]
+    },
+    {
+      "_comment": "I6 — a defect with no class label. Excluded from the repeat count rather than bucketed with the other unlabelled ones.",
+      "number": 106,
+      "title": "defect three, unclassified",
+      "state": "CLOSED",
+      "created_at": "2026-06-09T00:00:00Z",
+      "closed_at": "2026-06-09T06:00:00Z",
+      "labels": ["bug"]
+    }
+  ]
+}

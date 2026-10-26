@@ -1,0 +1,63 @@
+# from factory-seed@UNSTAMPED
+#
+# Enforce the story contract on every pull request body.
+#
+# WHY THIS EXISTS. docs/STORY-CONTRACT.md exists because three failure shapes
+# keep merging green in agent-built repos: wiring that lives outside the code
+# diff and was never written down, a guard nobody watched fail, and a test result
+# read from cache. A document alone stops none of them — it gets followed
+# mechanically for a fortnight and then hollowed out. scripts/dod-check.sh is the
+# part that keeps asking.
+#
+# `on: pull_request` with NO path filter, deliberately. The thing being checked
+# is the PR body, which is not a file, so there is no path that correlates with
+# it — and a path-filtered guard would skip a documentation-only PR, including a
+# PR that changes nothing but the contract itself. A guard that skips the commit
+# that breaks it is not a guard.
+#
+# `edited` is in the types list for a reason worth stating. The default types are
+# opened/synchronize/reopened, and none of those fire when an author edits only
+# the description. Without `edited`, the intended workflow — open, see the check
+# go red, fix the body — would leave the check red forever with no way to clear
+# it except an empty commit, and the first person to hit that would ask for the
+# check to be removed. A check people ask to remove is one that gets removed.
+#
+# __RUNNER__ is a placeholder the install step replaces. If it survives, this
+# workflow cannot schedule AND runner-pinning-check goes red on it, because
+# `__RUNNER__` is not in .factory/allowed-runners. That is the intended
+# behaviour: an install step that can be skipped silently will be skipped.
+name: dod-check
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, edited, ready_for_review]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  dod:
+    runs-on: __RUNNER__
+    steps:
+      - uses: actions/checkout@v4
+
+      # The checker guards PR bodies; this guards the checker. Every MUST-FAIL
+      # case in the suite is a way dod-check.sh could be loosened to let a body
+      # through, asserted to still be red — so a regex quietly widened to pass
+      # someone's own PR fails here first.
+      - name: dod-check guards its own regressions
+        run: bash scripts/dod-check.test.sh
+
+      # The body is attacker-controlled text and is passed through the
+      # environment, never interpolated into the shell. `${{ }}` substitution
+      # into a `run:` block is textual, so a PR body containing a backtick or
+      # $(...) would execute on the runner.
+      - name: PR body carries every mandatory section
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          printf '%s\n' "$PR_BODY" | bash scripts/dod-check.sh

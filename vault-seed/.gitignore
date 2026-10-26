@@ -1,0 +1,75 @@
+# Vault .gitignore
+#
+# Two jobs: keep churn out of the history, and keep secrets out of a repo that
+# will contain client material and is synced automatically.
+
+# --- Obsidian ---------------------------------------------------------------
+# workspace* changes on every pane resize and would produce a commit per glance.
+.obsidian/workspace
+.obsidian/workspace.json
+.obsidian/workspace-mobile.json
+.obsidian/cache
+.obsidian/plugins/*/data.json
+.trash/
+
+# Keep the rest of .obsidian: themes, hotkeys, community-plugins.json and the
+# graph config are worth syncing across machines.
+
+# --- Secrets ----------------------------------------------------------------
+# An agent that writes credentials into a note has already made a mistake, but
+# an automatic `git push` turns that mistake into disclosure. These patterns are
+# a backstop, not a control.
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+*.p12
+*.pfx
+*.keystore
+*.jks
+id_rsa*
+id_ed25519*
+*credentials*.json
+*service-account*.json
+*-sa.json
+.netrc
+.npmrc
+.pypirc
+kubeconfig
+*.kubeconfig
+secrets.yaml
+secrets.yml
+
+# --- Transient agent output --------------------------------------------------
+# Scratch space. Anything worth keeping gets written into a zone, not left here.
+.scratch/
+tmp/
+*.tmp
+*.partial
+
+# --- Tooling ----------------------------------------------------------------
+__pycache__/
+*.pyc
+.venv/
+venv/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+node_modules/
+
+# --- OS ---------------------------------------------------------------------
+.DS_Store
+.DS_Store?
+._*
+Thumbs.db
+desktop.ini
+*~
+.*.swp
+.*.swo
+
+# --- Deliberately NOT ignored ------------------------------------------------
+# .claude/          the org's agents, skills, rules and memory ARE the vault
+# Sessions/         journals are the audit trail
+# Clients/          the wiki is the point
+# Team/             generated files are tracked so drift is visible in a diff
