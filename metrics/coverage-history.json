@@ -60,17 +60,17 @@
           "total": 974
         },
         "python_tools": {
-          "covered": 2340,
+          "covered": 2342,
           "total": 3249
         }
       },
       "metrics": {
         "go_sdlc_metrics": 83.2356389214537,
         "python_plugin": 79.7741273100616,
-        "python_tools": 72.02216066481995
+        "python_tools": 72.08371806709756
       },
       "pr": 12,
-      "ref": "fa1a94dd3c1fc70addefad206ce6ed389ca32338"
+      "ref": "42a39524975f5a8360d8f58b53b7c04cef770bff"
     }
   ],
   "version": 1,
