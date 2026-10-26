@@ -7,13 +7,14 @@
 # qa_vendors is the preference order for QA. When more than one vendor is
 # installed, QA is a different vendor from the one that built the change.
 # With one vendor, QA uses that vendor in its own pane, named qa-<ticket>.
-# usage_rebalance_below is remaining usage as a fraction. At or below this
-# floor the planner moves the session to another installed vendor that is
-# still above the floor. 0.15 means 15% usage left. QA will not move onto
-# the builder while another vendor is installed.
+# usage_rebalance_below is remaining usage as a fraction for build and QA
+# sessions. At or below this floor the planner may choose another installed
+# vendor that is still above the floor. The owner-named lead never moves
+# automatically; quota pressure is a signal for the lead to decide and post.
+# 0.15 means 15% usage left. QA will not move onto the builder when alternatives exist.
 # memory_store is the one directory every vendor memory_link points at.
 version: 1
-lead_vendor: claude
+lead_vendor: grok
 build_vendors: [grok, codex]
 build_personas: [engineer, ios-engineer, android-engineer, devops]
 qa_persona: qa

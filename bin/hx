@@ -13,6 +13,8 @@ def main(argv):
         print(
             "usage: hx <command> [options]\n\n"
             "commands:\n  chat  read and post to team Slack"
+            "\n  lock lead  record an owner-authorized lead holder"
+            "\n  lead       read or hand off the current lead brief"
         )
         return 0
     command, *args = argv
@@ -20,6 +22,17 @@ def main(argv):
         from hx_chat import main as chat_main
 
         return chat_main(args)
+    if command == "lock":
+        if not args or args[0] != "lead":
+            print("hx lock: expected 'lead'", file=sys.stderr)
+            return 2
+        from hx_lead import lock_main
+
+        return lock_main(args[1:])
+    if command == "lead":
+        from hx_lead import main as lead_main
+
+        return lead_main(args)
     print(f"hx: unknown command: {command}", file=sys.stderr)
     return 2
 

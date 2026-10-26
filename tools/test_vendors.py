@@ -18,6 +18,7 @@ import setup
 import update
 import vendors
 from test_hx_chat import HxChatTests  # gate runs this shared test entry point too
+from test_lead import LeadTests  # gate covers owner-authorized lead state too
 
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -115,19 +116,19 @@ class VendorTests(unittest.TestCase):
 
     def test_lead_vendor_is_the_configured_name(self):
         routing = vendors.load_routing()
-        self.assertEqual(routing["lead_vendor"], "claude")
+        self.assertEqual(routing["lead_vendor"], "grok")
         self.assertEqual(routing["usage_rebalance_below"], 0.15)
 
         plan = vendors.plan_session("lead", "OPS-347", INSTALLED, posture="balanced")
-        self.assertEqual(plan["vendor"], "claude")
+        self.assertEqual(plan["vendor"], "grok")
         self.assertEqual(plan["tier"], "lead")
-        self.assertEqual(plan["model"], "opus")
+        self.assertEqual(plan["model"], "grok-4.7")
         self.assertEqual(plan["pane"], "lead-OPS-347")
         self.assertEqual(
             plan["argv"],
             [
-                "herdr", "pane", "run", "lead-OPS-347", "claude",
-                "--model", "opus", "--agent", "lead", "-n", "lead-OPS-347",
+                "herdr", "pane", "run", "lead-OPS-347", "grok",
+                "--model", "grok-4.7", "--agent", "lead",
             ],
         )
         self.assertFalse(plan["rebalanced"])
@@ -137,13 +138,13 @@ class VendorTests(unittest.TestCase):
 
         product = vendors.plan_session("product", "OPS-347", INSTALLED)
         sre = vendors.plan_session("sre", "OPS-347", INSTALLED)
-        self.assertEqual(product["vendor"], "claude")
-        self.assertEqual(sre["vendor"], "claude")
-        self.assertEqual(product["model"], "sonnet")
+        self.assertEqual(product["vendor"], "grok")
+        self.assertEqual(sre["vendor"], "grok")
+        self.assertEqual(product["model"], "grok-4.7")
 
         with tempfile.TemporaryDirectory() as tmp:
             text = (ROOT / "org" / "routing.yaml").read_text(encoding="utf-8")
-            text = text.replace("lead_vendor: claude", "lead_vendor: codex", 1)
+            text = text.replace("lead_vendor: grok", "lead_vendor: codex", 1)
             path = os.path.join(tmp, "routing.yaml")
             with open(path, "w", encoding="utf-8") as handle:
                 handle.write(text)
@@ -305,11 +306,12 @@ class VendorTests(unittest.TestCase):
 
         lead = vendors.plan_session(
             "lead", "OPS-347", INSTALLED,
-            usage={"claude": floor, "codex": 0.8, "grok": 0.8},
+            usage={"grok": floor, "codex": 0.8, "claude": 0.8},
         )
-        self.assertEqual(lead["vendor"], "codex")
-        self.assertEqual(lead["model"], "gpt-6-sol")
-        self.assertTrue(lead["rebalanced"])
+        self.assertEqual(lead["vendor"], "grok")
+        self.assertEqual(lead["model"], "grok-4.7")
+        self.assertFalse(lead["rebalanced"])
+        self.assertTrue(lead["below_floor"])
 
         unread = vendors.plan_session(
             "engineer-1", "OPS-347", INSTALLED, usage={"grok": 0.10},
