@@ -60,6 +60,7 @@ class FakeHost:
                 ("/srv/app", "ops-227-guard-fix", False),
                 ("/srv/wt/app-ops-347", "ops-347-x", False),
                 ("/srv/wt/app-ops-347-dirty", "ops-347-y", False),
+                ("/srv/wt/app-ops-347-untracked", "ops-347-u", False),
                 ("/srv/wt/app-ops-400", "ops-400-z", False),
                 ("/srv/wt/gone", "ops-12-old", True),
                 ("/srv/wt/app-ops-227", "ops-227-guard-fix-2", False),
@@ -67,6 +68,7 @@ class FakeHost:
             HARNESS: [("/srv/harness", "ops-347-codex-persona", False)],
         }
         self.dirty = {"/srv/wt/app-ops-347-dirty"}
+        self.untracked = {CO, "/srv/wt/app-ops-347-untracked"}
         self.prs = {
             "OPS-347": [{"number": 7, "title": "OPS-347: persona", "headRefName": "ops-347-x",
                          "state": "MERGED", "mergedAt": "2026-10-26T07:48:18Z", "url": "u"}],
@@ -104,6 +106,8 @@ class FakeHost:
                 out.append("")
             return Result(0, "\n".join(out))
         if argv[0] == "git" and argv[3:4] == ["status"]:
+            if argv[2] in self.untracked and "--untracked-files=no" not in argv:
+                return Result(0, "?? junk\n")
             return Result(0, " M file\n" if argv[2] in self.dirty else "")
         if argv[0] == "git" and argv[3:5] == ["remote", "get-url"]:
             return Result(0, {CO: "git@github.com:acme/app.git\n",
@@ -187,6 +191,7 @@ class KeyTests(unittest.TestCase):
             cleanup.key_regex("347")
         self.assertEqual(cleanup.repo_slug("git@github.com:acme/app.git"), "acme/app")
         self.assertIsNone(cleanup.repo_slug("https://example.com/x"))
+        self.assertEqual(cleanup.repo_slug("git@github.com-agent:acme/app.git"), "acme/app")
 
     def test_launcher_labels(self):
         for label in ("qa-OPS-347", "grok-OPS-217", "engineer-1-OPS-345", "qa-QUEUE3"):
@@ -250,6 +255,7 @@ class DoneTests(unittest.TestCase):
         self.assertIn("would workspace: w36 qa-OPS-347", text)
         self.assertIn("would worktree: /srv/wt/app-ops-347 ", text)
         self.assertIn("skip worktree: /srv/wt/app-ops-347-dirty (uncommitted changes)", text)
+        self.assertIn("skip worktree: /srv/wt/app-ops-347-untracked (uncommitted changes)", text)
         self.assertIn("skip pane: w4:p2 grok-OPS-347 (live agent (grok))", text)
         self.assertIn("kill -INT 9", text)
         self.assertNotIn("kill -INT 10", text)
@@ -270,15 +276,16 @@ class DoneTests(unittest.TestCase):
                              checkouts=[CO])
             log_path = Path(tmp, "state", "cleanup.log")
             log = cleanup.Log(log_path, stream=io.StringIO())
-            fake.fail.add(("git", "-C", CO, "worktree", "prune"))
+            fake.fail.add(("git", "-C", CO, "fetch", "origin", "main"))
             code = hx_done.done_main(["OPS-227"], host=host, log=log)
-            self.assertEqual(code, 1)  # the prune failure is reported
+            self.assertEqual(code, 1)  # the fetch failure is reported
             ran = actions(fake)
             self.assertIn(["git", "-C", CO, "switch", "main"], ran)
             self.assertIn(["git", "-C", CO, "merge", "--ff-only", "origin/main"], ran)
             self.assertIn(["docker", "stop", "pg1879"], ran)
             self.assertIn([os.path.join(bindir, "pg_ctl"), "stop", "-D", "/tmp/qa-ops227/pg", "-m", "fast"], ran)
             self.assertNotIn(["git", "-C", CO, "worktree", "remove", "/srv/wt/app-ops-227"], ran)
+            self.assertNotIn(["git", "-C", CO, "worktree", "prune"], ran)
             written = log_path.read_text()
             self.assertIn("in use by pid 77", written)
             self.assertIn("FAILED rc=1", written)
@@ -512,6 +519,9 @@ class HostReadTests(unittest.TestCase):
         self.assertEqual(plan.actions, [])
         self.assertEqual([r for _k, _t, r in plan.skipped],
                          ["detached HEAD not on any remote branch", "locked"])
+        plan = cleanup.Plan()
+        cleanup.checkout_actions(plan, "/r", "x", "t", runner, trees)
+        self.assertEqual(plan.skipped, [("checkout", "/r", "x is checked out in another worktree")])
         plan = cleanup.Plan()
         cleanup.checkout_actions(plan, "/nope", "main", "t", runner)
         self.assertEqual(plan.skipped, [("checkout", "/nope", "git status failed")])

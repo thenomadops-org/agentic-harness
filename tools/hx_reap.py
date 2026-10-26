@@ -101,7 +101,7 @@ def plan_reap(host, max_age_hours, tmp_root="/tmp"):
                 if tree.branch and tree.branch != host.config["main_branch"] and finished:
                     cleanup.checkout_actions(plan, checkout, host.config["main_branch"],
                                              f"main checkout on Done {finished[0]} branch",
-                                             host.run)
+                                             host.run, trees)
                 continue
             if tree.prunable:
                 cleanup.worktree_action(plan, checkout, tree, "", cwds, host.run)
@@ -171,8 +171,8 @@ def plan_reap(host, max_age_hours, tmp_root="/tmp"):
 
 def summary(plan, closing):
     counts = {}
-    for action in plan.actions:
-        counts[action.kind] = counts.get(action.kind, 0) + 1
+    for kind, _target in {(a.kind, a.target) for a in plan.actions}:
+        counts[kind] = counts.get(kind, 0) + 1
     verb = "closed" if closing else "would close"
     parts = [f"{n} {kind}" for kind, n in sorted(counts.items())] or ["nothing"]
     return f"agent reaper: {verb} {', '.join(parts)}; skipped {len(plan.skipped)}"

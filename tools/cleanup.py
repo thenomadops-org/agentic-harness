@@ -232,7 +232,9 @@ class GitHub:
 
 def repo_slug(url):
     """owner/name from a GitHub remote URL, or None."""
-    match = re.search(r"github\.com[:/]([^/]+/[^/]+?)(?:\.git)?/?\Z", (url or "").strip())
+    # Accepts ssh host aliases such as git@github.com-agent:owner/name.git.
+    match = re.search(r"github\.com[A-Za-z0-9_.-]*[:/]([^/:]+/[^/]+?)(?:\.git)?/?\Z",
+                      (url or "").strip())
     return match.group(1) if match else None
 
 
@@ -330,9 +332,12 @@ def worktrees(checkout, runner=run):
     return rows
 
 
-def dirty(path, runner=run):
+def dirty(path, runner=run, untracked=True):
     """True when git reports changes, None when the tree cannot be read."""
-    result = runner(["git", "-C", path, "status", "--porcelain"])
+    argv = ["git", "-C", path, "status", "--porcelain"]
+    if not untracked:
+        argv.append("--untracked-files=no")
+    result = runner(argv)
     if result.returncode != 0:
         return None
     return bool(result.stdout.strip())
@@ -512,8 +517,13 @@ def worktree_action(plan, checkout, tree, reason, cwds, runner=run):
     plan.act("worktree", tree.path, ["git", "-C", checkout, "worktree", "remove", tree.path], reason)
 
 
-def checkout_actions(plan, checkout, main_branch, reason, runner=run):
-    state = dirty(checkout, runner)
+def checkout_actions(plan, checkout, main_branch, reason, runner=run, trees=()):
+    if any(t.branch == main_branch and not t.main for t in trees):
+        plan.skip("checkout", checkout, f"{main_branch} is checked out in another worktree")
+        return
+    # Untracked files survive a switch, and git refuses one that would
+    # overwrite them, so only tracked changes keep a checkout where it is.
+    state = dirty(checkout, runner, untracked=False)
     if state is None or state:
         plan.skip("checkout", checkout, "uncommitted changes" if state else "git status failed")
         return

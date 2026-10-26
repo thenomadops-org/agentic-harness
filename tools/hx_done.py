@@ -107,12 +107,13 @@ def plan_done(host, key, prs, force=False):
                 if tree.branch and (names_key(tree.branch) or tree.branch in branches):
                     cleanup.checkout_actions(plan, checkout, host.config["main_branch"],
                                              f"main checkout on {key} branch {tree.branch}",
-                                             host.run)
+                                             host.run, trees)
                 continue
             if names_key(tree.path, tree.branch) or tree.branch in branches:
                 cleanup.worktree_action(plan, checkout, tree, f"{key} worktree", cwds, host.run)
-        plan.act("prune", checkout, ["git", "-C", checkout, "worktree", "prune"],
-                 "drop metadata for deleted worktrees")
+        if any(a.kind == "worktree" and a.argv[2] == checkout for a in plan.actions):
+            plan.act("prune", checkout, ["git", "-C", checkout, "worktree", "prune"],
+                     "drop metadata for deleted worktrees")
 
     # scratch databases
     for pg in host.procs.postmasters():
