@@ -182,6 +182,9 @@ jobs:
       - name: python version
         run: python3 -c 'import sys; assert sys.version_info >= (3, 11), sys.version; print(sys.version)'
 
+      - name: an uninstalled vault ignores skills in the home directory
+        run: python3 tools/test_lint.py
+
       - name: a fresh vault lints clean
         run: |
           set -e
