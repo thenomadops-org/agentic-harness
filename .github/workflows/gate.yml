@@ -436,6 +436,7 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: tools/sdlc-metrics/go.mod
+          cache: false
       - name: measure coverage-only metrics
         run: python3 tools/metric_gate.py measure --out "${RUNNER_TEMP}/coverage.json"
       - name: compare against committed merge history
