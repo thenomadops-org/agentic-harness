@@ -121,7 +121,9 @@ def bind_shared_memory(vault, vendors_path=None, routing_path=None):
     collapse to one, including a later copy that matches any copy already
     kept for that path. When legacy directories hold different bytes at the
     same relative path, each distinct body is kept: the later copy is renamed,
-    and the rename is printed. A file already in the store with different
+    and the rename is printed. A later file that already uses that new name
+    is renamed again, so the planned rename is not overwritten. A file already
+    in the store with different
     bytes is refused and left where it is.
     """
     catalog = load_vendors(vendors_path)
@@ -343,8 +345,15 @@ def _plan_link(link, store, claimed, copies, vendor_id, reports):
         for name in filenames:
             src = os.path.join(dirpath, name)
             rel = os.path.relpath(src, link)
-            if rel in copies:
-                if _same_as_any(src, copies[rel]):
+            if rel in copies or rel in claimed:
+                # `claimed` covers a rename reserved earlier in this planning
+                # pass. That destination is not on disk yet, so a later vendor
+                # file with the same name must not be planned onto it.
+                priors = list(copies.get(rel, []))
+                occupant = claimed.get(rel)
+                if occupant is not None and occupant not in priors:
+                    priors.append(occupant)
+                if priors and _same_as_any(src, priors):
                     deletes.append(src)
                     continue
                 renamed = _renamed_relative(rel, vendor_id, claimed, store)
@@ -352,8 +361,10 @@ def _plan_link(link, store, claimed, copies, vendor_id, reports):
                     f"memory: kept both copies of {rel}; "
                     f"renamed the {vendor_id} copy to {renamed}"
                 )
+                if occupant is not None and rel not in copies:
+                    copies[rel] = [occupant]
+                copies.setdefault(rel, []).append(src)
                 claimed[renamed] = src
-                copies[rel].append(src)
                 moves.append((src, os.path.join(store, renamed)))
                 continue
             dst = os.path.join(store, rel)

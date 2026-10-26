@@ -485,6 +485,43 @@ class VendorTests(unittest.TestCase):
                 self.assertEqual(_body(link, "same-grok-2.md"), "g\n")
             self.assertEqual(_real_memory_dirs(vault), 1)
 
+    def test_later_vendor_does_not_overwrite_a_rename_target(self):
+        # Catalog order is codex, then grok, then third. Grok's same.md is
+        # renamed to same-grok.md before third is read. Third already has a
+        # file of that name. Planning must keep g; third's file takes a new name.
+        with tempfile.TemporaryDirectory() as tmp:
+            vendors_path = _catalog_with_third(tmp)
+            vault = os.path.join(tmp, "vault")
+            codex = os.path.join(vault, ".codex", "memory")
+            grok = os.path.join(vault, ".grok", "memory")
+            third = os.path.join(vault, ".third", "memory")
+            os.makedirs(codex)
+            os.makedirs(grok)
+            os.makedirs(third)
+            with open(os.path.join(codex, "same.md"), "w", encoding="utf-8") as handle:
+                handle.write("c\n")
+            with open(os.path.join(grok, "same.md"), "w", encoding="utf-8") as handle:
+                handle.write("g\n")
+            with open(os.path.join(third, "same-grok.md"), "w", encoding="utf-8") as handle:
+                handle.write("mine\n")
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output):
+                vendors.bind_shared_memory(vault, vendors_path=vendors_path)
+            store = os.path.join(vault, ".claude", "memory")
+            self.assertEqual(_body(store, "same.md"), "c\n")
+            self.assertEqual(_body(store, "same-grok.md"), "g\n")
+            self.assertEqual(_body(store, "same-grok-third.md"), "mine\n")
+            self.assertEqual(sorted(_memory_bodies(store)), ["c\n", "g\n", "mine\n"])
+            text = output.getvalue()
+            self.assertIn("renamed the grok copy to same-grok.md", text)
+            self.assertIn("renamed the third copy to same-grok-third.md", text)
+            for link in (codex, grok, third):
+                self.assertTrue(os.path.islink(link))
+                self.assertEqual(_body(link, "same.md"), "c\n")
+                self.assertEqual(_body(link, "same-grok.md"), "g\n")
+                self.assertEqual(_body(link, "same-grok-third.md"), "mine\n")
+            self.assertEqual(_real_memory_dirs(vault), 1)
+
     def test_three_identical_memories_collapse_to_one(self):
         with tempfile.TemporaryDirectory() as tmp:
             vendors_path = _catalog_with_third(tmp)
