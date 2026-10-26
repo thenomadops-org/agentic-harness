@@ -1,6 +1,10 @@
 # One record per CLI. Adding a vendor is a new record in this file.
 # command is the program started in the herdr pane. model_flag, agent_flag
 # and session_flag are that CLI's own arguments; a null flag is omitted.
+# agent_file means the agent_flag value is the vault file
+# .claude/agents/<persona>.md, which that CLI accepts as a definition path.
+# A null agent_flag omits the flag. The launch then prefixes the goal with
+# an instruction to read and adopt that same file.
 # models are the arguments passed after model_flag, by budget posture and tier.
 # memory_link is a vault-relative path. It points at the one store named by
 # routing.yaml memory_store. A second real directory is a copy and is refused.
@@ -32,6 +36,7 @@ vendors:
     command: grok
     model_flag: "--model"
     agent_flag: "--agent"
+    agent_file: true
     session_flag: null
     memory_link: ".grok/memory"
     models:

@@ -11,8 +11,10 @@ shell starts in the vault, and runs that herdr command. herdr addresses a
 pane by id, so the pane slot of the planned argv is the id just created.
 herdr joins the command tail and sends that line through a shell, so each
 element of the tail is shell-quoted first. The pane id is not quoted: herdr
-reads it itself. Nothing is written under the home directory. A dry run
-prints the plan and does not run herdr.
+reads it itself. The plan is built for this vault, so a vendor with no agent
+flag is told to read and adopt the vault persona file, and a vendor that
+takes a definition path is given that file. Nothing is written under the
+home directory. A dry run prints the plan and does not run herdr.
 """
 
 import argparse
@@ -99,7 +101,7 @@ def main(argv=None):
             kwargs["builder_vendor"] = args.builder
         plan = vendors.plan_session(
             args.persona, args.ticket, installed,
-            goal=args.goal, usage=parse_usage(args.usage), **kwargs,
+            goal=args.goal, usage=parse_usage(args.usage), vault=vault, **kwargs,
         )
     except vendors.VendorError as exc:
         print(f"error: {exc}", file=sys.stderr)

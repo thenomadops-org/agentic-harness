@@ -46,6 +46,9 @@ class VendorTests(unittest.TestCase):
         self.assertIsNone(by_id["codex"]["agent_flag"])
         self.assertEqual(by_id["grok"]["command"], "grok")
         self.assertEqual(by_id["grok"]["agent_flag"], "--agent")
+        self.assertIs(by_id["grok"]["agent_file"], True)
+        self.assertIsNone(by_id["claude"].get("agent_file"))
+        self.assertIsNone(by_id["codex"].get("agent_file"))
 
         postures = miniyaml.load(ROOT / "org" / "roles.yaml")["budget_postures"]
         self.assertEqual(by_id["claude"]["models"], postures)

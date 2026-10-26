@@ -34,6 +34,7 @@ class LaunchTests(unittest.TestCase):
             self.assertEqual(code, 0)
             plan = vendors.plan_session(
                 "engineer-1", "OPS-347", ["grok"], goal="build the adapter",
+                vault=os.path.realpath(vault),
             )
             ran = self._pane_run(rows, plan["argv"])
             self.assertEqual(ran["cwd"], os.path.realpath(vault))
@@ -62,6 +63,7 @@ class LaunchTests(unittest.TestCase):
             self.assertEqual(code, 0)
             plan = vendors.plan_session(
                 "engineer-1", "OPS-347", ["grok"], goal=goal,
+                vault=os.path.realpath(vault),
             )
             with open(os.path.join(home, "bin", "vendor.jsonl"), encoding="utf-8") as handle:
                 vendor_rows = [json.loads(line) for line in handle if line.strip()]
@@ -72,6 +74,84 @@ class LaunchTests(unittest.TestCase):
             self.assertIn(" ", received[-1])
             self.assertIn('"', received[-1])
             self.assertNotIn("test", received)
+
+    def test_codex_goal_tells_the_session_to_adopt_its_persona_file(self):
+        # Codex has no agent flag. The pane shell must still receive one goal
+        # argument that names the vault persona file and keeps the real goal.
+        goal = 'review the "change"'
+        with tempfile.TemporaryDirectory() as tmp:
+            vault = os.path.join(tmp, "vault")
+            home = os.path.join(tmp, "home")
+            os.makedirs(vault)
+            os.makedirs(home)
+            code, _output, _rows = _launch(
+                home, vault,
+                ["qa", "OPS-347", goal, "--vault", vault],
+                ["codex"],
+                through_shell=True,
+            )
+            self.assertEqual(code, 0)
+            received = _vendor_args(home)
+            persona = os.path.join(
+                os.path.realpath(vault), ".claude", "agents", "qa.md",
+            )
+            self.assertEqual(received[-1].count(persona), 1)
+            self.assertIn("Read and adopt", received[-1])
+            self.assertIn(goal, received[-1])
+            self.assertIn(" ", received[-1])
+            self.assertIn('"', received[-1])
+            self.assertNotIn("change", received[:-1])
+            plan = vendors.plan_session(
+                "qa", "OPS-347", ["codex"], goal=goal, vault=os.path.realpath(vault),
+            )
+            self.assertEqual(received, plan["argv"][5:])
+
+    def test_grok_agent_flag_is_the_vault_persona_file(self):
+        # A bare --agent engineer-1 does not load the vault definition.
+        # The flag's own file-path form does, so the launched argv must use it.
+        with tempfile.TemporaryDirectory() as tmp:
+            vault = os.path.join(tmp, "vault")
+            home = os.path.join(tmp, "home")
+            os.makedirs(vault)
+            os.makedirs(home)
+            code, _output, _rows = _launch(
+                home, vault,
+                ["engineer-1", "OPS-347", "state your role", "--vault", vault],
+                ["grok"],
+                through_shell=True,
+            )
+            self.assertEqual(code, 0)
+            received = _vendor_args(home)
+            persona = os.path.join(
+                os.path.realpath(vault), ".claude", "agents", "engineer-1.md",
+            )
+            self.assertEqual(received[received.index("--agent") + 1], persona)
+            self.assertNotEqual(received[received.index("--agent") + 1], "engineer-1")
+            plan = vendors.plan_session(
+                "engineer-1", "OPS-347", ["grok"], goal="state your role",
+                vault=os.path.realpath(vault),
+            )
+            self.assertEqual(received, plan["argv"][5:])
+            self.assertEqual(plan["argv"][plan["argv"].index("--agent") + 1], persona)
+
+    def test_claude_agent_flag_stays_the_persona_name(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            vault = os.path.join(tmp, "vault")
+            home = os.path.join(tmp, "home")
+            os.makedirs(vault)
+            os.makedirs(home)
+            code, _output, rows = _launch(
+                home, vault,
+                ["lead", "OPS-347", "state your role", "--vault", vault],
+                ["claude"],
+            )
+            self.assertEqual(code, 0)
+            plan = vendors.plan_session(
+                "lead", "OPS-347", ["claude"], goal="state your role",
+            )
+            ran = self._pane_run(rows, plan["argv"])
+            agent = ran["argv"][ran["argv"].index("--agent") + 1]
+            self.assertEqual(agent, "lead")
 
     def test_dry_run_prints_the_plan_and_does_not_run_herdr(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -108,6 +188,7 @@ class LaunchTests(unittest.TestCase):
             plan = vendors.plan_session(
                 "engineer-1", "OPS-347", ["grok", "codex"], goal="build it",
                 usage={"grok": 0.0, "codex": 0.5},
+                vault=os.path.realpath(vault),
             )
             ran = self._pane_run(rows, plan["argv"])
             self.assertEqual(plan["vendor"], "codex")
@@ -135,6 +216,7 @@ class LaunchTests(unittest.TestCase):
             plan = vendors.plan_session(
                 "qa", "OPS-347", installed, goal="check the change",
                 builder_vendor="codex",
+                vault=os.path.realpath(vault),
             )
             ran = self._pane_run(rows, plan["argv"])
             self.assertEqual(ran["cwd"], os.path.realpath(vault))
@@ -226,6 +308,15 @@ def _launch(home, vault, args, vendor_commands, through_shell=False):
         with open(record, encoding="utf-8") as handle:
             rows = [json.loads(line) for line in handle if line.strip()]
     return code, stdout.getvalue(), rows
+
+
+def _vendor_args(home):
+    path = os.path.join(home, "bin", "vendor.jsonl")
+    with open(path, encoding="utf-8") as handle:
+        rows = [json.loads(line) for line in handle if line.strip()]
+    if len(rows) != 1:
+        raise AssertionError(f"expected one vendor command, got {rows!r}")
+    return rows[0]["argv"][1:]
 
 
 def _fake_path(bindir, vendor_commands, through_shell=False):

@@ -42,8 +42,14 @@ def load_routing(path=None):
 
 def plan_session(persona, ticket, installed, goal="", usage=None,
                  builder_vendor=None, posture="balanced", vendors_path=None,
-                 routing_path=None, roles_path=None):
-    """Choose a vendor and model and return the herdr argv. Do not run it."""
+                 routing_path=None, roles_path=None, vault=None):
+    """Choose a vendor and model and return the herdr argv. Do not run it.
+
+    When vault is set, a vendor with no agent flag gets a goal prefixed with
+    an instruction to read and adopt that vault's persona file. A vendor with
+    agent_file set gets that file as its agent argument. The pane id and the
+    vendor command stay as planned.
+    """
     catalog = load_vendors(vendors_path)
     routing = load_routing(routing_path)
     _validate_routing(routing, catalog)
@@ -101,7 +107,7 @@ def plan_session(persona, ticket, installed, goal="", usage=None,
         "posture": posture,
         "rebalanced": rebalanced,
         "below_floor": below_floor,
-        "argv": _argv(record, persona, pane, model, goal),
+        "argv": _argv(record, persona, pane, model, goal, vault),
     }
 
 
@@ -178,6 +184,11 @@ def _validate_vendors(document):
             value = record.get(flag)
             if value is not None and not isinstance(value, str):
                 raise VendorError(f"{ident} {flag} must be a string or null")
+        agent_file = record.get("agent_file")
+        if agent_file is not None and not isinstance(agent_file, bool):
+            raise VendorError(f"{ident} agent_file must be true or false")
+        if agent_file and not record.get("agent_flag"):
+            raise VendorError(f"{ident} agent_file needs an agent_flag")
         models = record.get("models")
         if not isinstance(models, dict):
             raise VendorError(f"{ident} needs models")
@@ -305,10 +316,22 @@ def _token(value, label):
     return value
 
 
-def _argv(record, persona, pane, model, goal):
+def _persona_file(vault, persona):
+    return os.path.join(os.path.realpath(vault), ".claude", "agents", persona + ".md")
+
+
+def _argv(record, persona, pane, model, goal, vault=None):
     argv = ["herdr", "pane", "run", pane, record["command"], record["model_flag"], model]
     if record.get("agent_flag"):
-        argv.extend([record["agent_flag"], persona])
+        if vault and record.get("agent_file"):
+            agent = _persona_file(vault, persona)
+        else:
+            agent = persona
+        argv.extend([record["agent_flag"], agent])
+    elif vault:
+        path = _persona_file(vault, persona)
+        instruction = f"Read and adopt {path} before any other work."
+        goal = instruction if not goal else instruction + "\n" + goal
     if record.get("session_flag"):
         argv.extend([record["session_flag"], pane])
     if goal:
