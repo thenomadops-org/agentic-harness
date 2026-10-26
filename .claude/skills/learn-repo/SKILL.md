@@ -9,6 +9,9 @@ Vault = this folder (your Obsidian vault). The repo to ingest comes from the inv
 
 Follow the frontmatter contract and colour rules in the vault `CLAUDE.md`. Every note you write gets all 8 frontmatter fields, a `repo/<repo>` tag, body callouts matching its `color:`, and wiki-links to siblings (links resolve by basename).
 
+Keep workforce references role-based: use the persona id from `org/roles.yaml`
+and name any live work session `<persona>-<TICKET>`.
+
 ## Phase 0 — Preflight
 - Resolve `<repo>` to a path. Target vault folder = arg 2, else the repo basename.
 - If the target folder already EXISTS → **extend mode**: compute and fill only the gap.
@@ -34,7 +37,7 @@ Follow the frontmatter contract and colour rules in the vault `CLAUDE.md`. Every
 - **PRESENT** the verify report + a short summary (notes written, structure, any source-accuracy caveats) and **WAIT for review.**
 
 ## Phase 6 — Wire-up
-- Add the new folder's MOC to `00-Index/Master-Index.md` under the right theme.
+- Add the new folder's MOC to `00-Index/Master-Index.md` under the right category.
 - Add a row for the repo to `_Memory/00-Memory-Index.md`, and start its `_Memory/<repo>-Memory.md` file.
 
 ## If you rename or split a folder later

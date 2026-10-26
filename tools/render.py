@@ -1,11 +1,11 @@
-"""Render an org from `roles.yaml` + a naming choice. Stdlib only.
+"""Render an org from `roles.yaml`. Stdlib only.
 
-Reads the role tree, picks the roles in the chosen packs, assigns names,
-expands pooled roles into seats, and writes one set of files per seat plus the
-org-wide documents.
+Reads the role tree, picks the roles in the chosen packs, expands pooled roles
+into persona seats, and writes one set of files per seat plus the org-wide
+documents.
 
     python3 tools/render.py \\
-        --principal Chris --theme friends \\
+        --principal owner \\
         --packs core,engineering --vault ~/my-vault --out ./out
 
 Validation runs before anything is written, so a bad org fails without leaving
@@ -16,7 +16,6 @@ import argparse
 import hashlib
 import json
 import os
-import re
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -26,7 +25,6 @@ import minitemplate  # noqa: E402
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 ROLES = os.path.join(ROOT, "org", "roles.yaml")
-THEMES = os.path.join(ROOT, "org", "naming", "themes.yaml")
 TEMPLATES = os.path.join(ROOT, "org", "templates")
 
 PER_SEAT = {
@@ -150,70 +148,16 @@ def select_roles(spec, packs):
     return roles
 
 
-def assign_names(roles, theme_name, themes, custom=None):
-    """Return a name per seat, in file order. Pooled roles get several."""
-    seats_needed = sum(int(role.get("instances") or 1) for role in roles)
-
-    if custom:
-        pool = list(custom)
-        if len(pool) != seats_needed:
-            raise OrgError(f"got {len(pool)} custom names for {seats_needed} seats")
-    elif theme_name == "role_ids":
-        pool = None
-    elif theme_name == "default":
-        pool = None
-    else:
-        theme = (themes.get("themes") or {}).get(theme_name)
-        if theme is None:
-            raise OrgError(
-                f"unknown theme {theme_name!r}; known: "
-                f"{sorted((themes.get('themes') or {}))}"
-            )
-        pool = list(theme.get("names") or [])
-        if len(pool) < seats_needed:
-            raise OrgError(
-                f"theme {theme_name!r} has {len(pool)} names, org needs {seats_needed}"
-            )
-
-    names, cursor = [], 0
+def persona_ids(roles):
+    """Return role ids, adding stable numeric suffixes for pooled roles."""
+    personas = []
     for role in roles:
         count = int(role.get("instances") or 1)
-        for index in range(count):
-            if pool is not None:
-                names.append(pool[cursor])
-                cursor += 1
-            elif theme_name == "role_ids":
-                names.append(role["id"] if count == 1 else f"{role['id']}-{index + 1}")
-            else:  # default names from roles.yaml
-                default = role.get("default_name")
-                if isinstance(default, list):
-                    if index >= len(default):
-                        raise OrgError(
-                            f"{role['id']}: needs {count} default names, has {len(default)}"
-                        )
-                    names.append(default[index])
-                else:
-                    names.append(default)
-    return names
-
-
-def check_names(names, principal, themes, strict_pattern=True):
-    problems = []
-    reserved = {str(n).lower() for n in (themes.get("reserved") or [])}
-    pattern = ((themes.get("rules") or {}).get("pattern")) or r"^[A-Z][a-z]{1,11}$"
-
-    lowered = [str(n).lower() for n in names]
-    for name in names:
-        if str(name).lower() in reserved:
-            problems.append(f"{name!r} is a reserved word")
-        if lowered.count(str(name).lower()) > 1:
-            problems.append(f"{name!r} is used more than once")
-        if principal and str(name).lower() == str(principal).lower():
-            problems.append(f"{name!r} is also the principal's name")
-        if strict_pattern and not re.match(pattern, str(name)):
-            problems.append(f"{name!r} does not match {pattern}")
-    if problems:
-        raise OrgError("naming problems:\n  - " + "\n  - ".join(sorted(set(problems))))
+        personas.extend(
+            role["id"] if count == 1 else f"{role['id']}-{index + 1}"
+            for index in range(count)
+        )
+    return personas
 
 
 def build_seats(spec, roles, names, options):
@@ -225,7 +169,7 @@ def build_seats(spec, roles, names, options):
             f"{sorted(spec.get('budget_postures') or {})}"
         )
 
-    # role_id -> the names holding it (a pool has several)
+    # role_id -> persona ids holding it (a pool has several)
     holders, cursor = {}, 0
     for role in roles:
         count = int(role.get("instances") or 1)
@@ -328,7 +272,6 @@ def render_org(seats, options, out_dir, spec):
         "vault_path": options["vault"],
         "today": options["today"],
         "posture": options["posture"],
-        "theme": options["theme"],
         "seats": seats,
         "seat_count": len(seats),
         "staff": [s for s in seats if s["is_staff"]],
@@ -343,8 +286,7 @@ def render_org(seats, options, out_dir, spec):
     manifest = os.path.join(out_dir, ".claude", "generated.json")
     _write(manifest, json.dumps(
         {"rendered": options["today"] or "unknown",
-         "theme": options["theme"],
-         "note": "Checked by lint_vault.py. A hand-edit to any file listed "
+        "note": "Checked by lint_vault.py. A hand-edit to any file listed "
                  "here is reverted by the next `org update` — change "
                  "roles.yaml instead.",
          "files": generated},
@@ -396,9 +338,6 @@ def _write(path, body):
 def main(argv=None):
     parser = argparse.ArgumentParser(description="Render an org from roles.yaml")
     parser.add_argument("--principal", required=True, help="the human's name")
-    parser.add_argument("--theme", default="default",
-                        help="name set: default, role_ids, friends, singers, …")
-    parser.add_argument("--names", help="comma-separated custom names, one per seat")
     parser.add_argument("--packs", default="core",
                         help="comma-separated packs; required packs are always added")
     parser.add_argument("--vault", required=True, help="path to the vault")
@@ -411,27 +350,22 @@ def main(argv=None):
     args = parser.parse_args(argv)
 
     spec = miniyaml.load(ROLES)
-    themes = miniyaml.load(THEMES)
     validate_roles(spec)
 
     roles = select_roles(spec, [p.strip() for p in args.packs.split(",") if p.strip()])
-    custom = [n.strip() for n in args.names.split(",")] if args.names else None
-    names = assign_names(roles, args.theme, themes, custom)
-    check_names(names, args.principal, themes,
-                strict_pattern=(args.theme != "role_ids"))
+    names = persona_ids(roles)
 
     options = {
         "principal": args.principal,
         "vault": os.path.expanduser(args.vault).rstrip("/"),
         "posture": args.posture,
-        "theme": args.theme,
         "today": args.today,
     }
     seats = build_seats(spec, roles, names, options)
 
     print(_chart(seats, args.principal))
     print()
-    print(f"{len(seats)} seats · theme {args.theme} · posture {args.posture}")
+    print(f"{len(seats)} personas · posture {args.posture}")
     for seat in seats:
         print(f"  {seat['name']:<16} {seat['title']:<34} {seat['model']}")
 

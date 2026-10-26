@@ -20,6 +20,23 @@ The harness rewrite is in progress (OPS-332..340). The full rewrite is OPS-334.
 - Split a change into stacked pull requests, one concern each, merged bottom-up
   with merge commits.
 
+## Workforce personas
+
+Role ids are the persona display and agent identity. Never use a personal name
+for a persona or session. Live sessions use `<persona>-<TICKET>`; pooled seats
+add a number before the ticket, such as `engineer-1-OPS-345`.
+
+| SDLC stage | Persona |
+|---|---|
+| Intent, spec | `product` |
+| Build | `engineer`, `ios-engineer`, `android-engineer` |
+| Deploy | `devops` |
+| QA | `qa` |
+| Maintain | `sre` |
+| Coordination and merge after QA | `lead` |
+
+`org/roles.yaml` is the source of truth for these ids and their reporting lines.
+
 ## Publication boundary
 
 This repository is written to be publishable. `tools/check_public.py` enforces

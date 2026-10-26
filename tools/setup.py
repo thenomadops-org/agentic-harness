@@ -1,10 +1,10 @@
-"""Create a vault, render the org into it, and record the choices. Stdlib only.
+"""Create a vault, render role personas into it, and record the choices. Stdlib only.
 
 The one-time step. `setup-my-org` drives the conversation and calls this with
 the answers; nothing here asks questions, so it is equally usable from a script.
 
-    python3 tools/setup.py --vault ~/my-vault --principal Chris \\
-        --packs core,engineering --theme greek --tracker github-issues
+    python3 tools/setup.py --vault ~/my-vault --principal owner \\
+        --packs core,engineering --tracker github-issues
 
 Refuses to run twice. One fork holds one org — see ADR-0002 — so an existing
 `Team/Team-ORG.md` means this is an update, and updates go through
@@ -101,8 +101,6 @@ def main(argv=None):
     parser.add_argument("--vault", required=True)
     parser.add_argument("--principal", required=True)
     parser.add_argument("--packs", default="core")
-    parser.add_argument("--theme", default="default")
-    parser.add_argument("--names", help="comma-separated, one per seat")
     parser.add_argument("--posture", default="balanced",
                         choices=["frugal", "balanced", "max"])
     parser.add_argument("--tracker", default="github-issues", choices=TRACKERS)
@@ -153,16 +151,12 @@ def main(argv=None):
     # writes, so a bad answer fails without leaving half a team behind.
     argv_render = [
         "--principal", args.principal,
-        "--theme", args.theme,
         "--packs", args.packs,
         "--vault", vault,
         "--posture", args.posture,
         "--out", vault,
         "--today", args.today,
     ]
-    if args.names:
-        argv_render += ["--names", args.names]
-
     print()
     code = render.main(argv_render)
     if code != 0:
@@ -173,7 +167,6 @@ def main(argv=None):
         "principal": args.principal,
         "vault": vault,
         "packs": [p.strip() for p in args.packs.split(",") if p.strip()],
-        "theme": args.theme,
         "posture": args.posture,
         "tracker": {"kind": args.tracker, "project": args.tracker_project},
         "created": args.today or "unknown",
@@ -194,8 +187,8 @@ def main(argv=None):
     print("  python3 .claude/skills/install-org/install.py")
     print("  python3 lint_vault.py")
     print()
-    print("Then start a NEW Claude session and ask one agent to state its own")
-    print("name and manager. That round-trip is the only real proof.")
+    print("Then start a NEW Claude session named <persona>-<TICKET> and ask")
+    print("it to state its role id and reporting line.")
     return 0
 
 

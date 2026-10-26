@@ -83,7 +83,7 @@ def main():
 
     # The files this project actually ships must round-trip.
     here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    for relative in ("org/roles.yaml", "org/naming/themes.yaml"):
+    for relative in ("org/roles.yaml",):
         path = os.path.join(here, relative)
         if not os.path.exists(path):
             failures.append(f"{relative}: missing")
