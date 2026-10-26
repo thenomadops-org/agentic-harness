@@ -30,15 +30,15 @@ Each fact is a ruling or a check in this repository.
 
 6. **An on-demand update reads live sources.** When the owner asks `update?`, the interface answers from the tracker item, the pull request and its CI, and the live session panes. Persona sessions are herdr panes opened by [`tools/launch.py`](../../tools/launch.py).
 
-7. **No tracker access is a tagged note.** An agent that cannot perform a tracker transition still posts when `team-post` is on PATH. The message is one line of three fields separated by ` | `. The status field may contain spaces and may not contain `|`.
+7. **No tracker access is a tagged note.** An agent that cannot perform a tracker transition still posts when `team-post` is on PATH. [`org/templates/agent.md.tmpl`](../../org/templates/agent.md.tmpl) tells that agent to post the tagged line. The message is one line of three fields separated by ` | `. The status field may contain spaces and may not contain `|`.
 
 ```text
 no-tracker: <ITEM-KEY> | <status name> | <one line>
 ```
 
-`<ITEM-KEY>` is the tracker's key. `<status name>` is the workflow's status name. The interface reads the matching transition on the live item and applies it, then reads the item back. A status name the live workflow does not have stays unchanged, and the interface tells the owner the name was refused. `<one line>` is the outcome the agent is reporting (`done`, `ready for QA`, `QA pass`, `QA fail`, or `blocked`) and the pull-request link.
+`<ITEM-KEY>` is the tracker's key. `<one line>` is the outcome the agent is reporting (`done`, `ready for QA`, `QA pass`, `QA fail`, or `blocked`) and the pull-request link. The interface honours the note only when the relay identity is a vendor id in [`org/vendors.yaml`](../../org/vendors.yaml). It applies a note only for the review status or the blocked status. It refuses the ready status, the in-progress status, the done status, and any other name. A note that names the ready status would order work, and that stays with the owner. Before it applies an honoured note, it checks the pull request, that pull request's CI, and the tracker item, as fact 4 requires, and reads the item back after the write. A refused note leaves the item unchanged, and the interface tells the owner the note was refused and which rule refused it. Example names, read live rather than stored as ids: review `In Review`, blocked `blocked`, ready `To Do`.
 
-8. **The tree names the command and does not read the post.** [`org/templates/agent.md.tmpl`](../../org/templates/agent.md.tmpl) tells the agent: when `team-post` is on PATH, post `done`, `ready for QA`, `QA pass`, `QA fail`, or `blocked` by running `team-post` with the vendor id of the CLI that started the session; when `team-post` is not on PATH, say nothing. `test_every_rendered_agent_posts_or_stays_quiet` in [`tools/test_launch.py`](../../tools/test_launch.py) asserts those words and rejects the transport name `slack` in a rendered agent. A search of the Python in this repository finds `team-post` in that test only. The program that implements `team-post` lives outside this repository. Its channel and its credentials stay outside with it.
+8. **The tree names the command and does not read the post.** [`org/templates/agent.md.tmpl`](../../org/templates/agent.md.tmpl) tells the agent: when `team-post` is on PATH, post `done`, `ready for QA`, `QA pass`, `QA fail`, or `blocked` by running `team-post` with the vendor id of the CLI that started the session; when `team-post` is not on PATH, say nothing; when the agent has no tracker access, post the `no-tracker:` line from fact 7 the same way. `test_every_rendered_agent_posts_or_stays_quiet` in [`tools/test_launch.py`](../../tools/test_launch.py) asserts those words, asserts `no-tracker:`, and rejects the transport name `slack` in a rendered agent. A search of the Python in this repository finds `team-post` in that test only. The program that implements `team-post` lives outside this repository. Its channel and its credentials stay outside with it. No module in this tree applies a `no-tracker:` line.
 
 9. **Closing stays with the owner.** The interface leaves an item short of done when an agent posts, including a `no-tracker:` note that names a done status. [The adapter contract](../../adapters/README.md) states this under "Never close."
 
@@ -54,12 +54,13 @@ An agent that cannot move the tracker uses fact 7:
 team-post <vendor-id> "no-tracker: PROJ-123 | In Review | ready for QA: https://example.invalid/pull/1"
 ```
 
-`PROJ-123`, `In Review`, and `example.invalid` are placeholders. Another workflow uses its own status name.
+`PROJ-123`, `In Review`, and `example.invalid` are placeholders. `In Review` is a review status, which fact 7 allows. A note that names `To Do` or a done status is refused.
 
 ## Open
 
 - A tracker workflow with no grooming status. Fact 2 names that status and does not invent a substitute.
 - The zone of the quiet-hours clock. Fact 5 uses the owner's local time. A fixed zone is not set.
+- Which night-time QA posts count as awaited. Fact 5 relays every `QA pass` and `QA fail`. The owner decides whether that stands.
 
 ## See also
 
